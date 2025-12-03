@@ -1,0 +1,9 @@
+{
+  "platforms": ["apple", "android", "web"],
+  "apple": {
+    "modules": ["ExpoOrpheusModule"]
+  },
+  "android": {
+    "modules": ["expo.modules.orpheus.ExpoOrpheusModule"]
+  }
+}

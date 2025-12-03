@@ -41,3 +41,11 @@ android {
     abortOnError false
   }
 }
+
+dependencies {
+    implementation "androidx.media3:media3-exoplayer:1.8.0"
+    implementation "androidx.media3:media3-session:1.8.0"
+    implementation "com.squareup.retrofit2:retrofit:3.1.0-SNAPSHOT"
+    implementation "com.google.code.gson:gson:2.13.2"
+    implementation "com.squareup.retrofit2:converter-gson:3.1.0-SNAPSHOT"
+}

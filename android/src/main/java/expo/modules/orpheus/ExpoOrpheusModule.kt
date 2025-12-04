@@ -177,7 +177,7 @@ class ExpoOrpheusModule : Module() {
             }
 
             return@AsyncFunction queue
-        }
+        }.runOnQueue(Queues.MAIN)
 
         AsyncFunction("add") { tracks: List<TrackRecord> ->
             // 1. 【后台线程】执行：JSON 转换、Metadata 构建 (耗时操作在这里做，不卡 UI)
@@ -228,7 +228,7 @@ class ExpoOrpheusModule : Module() {
                     }
                 }
             }
-        }
+        }.runOnQueue(Queues.MAIN)
     }
 
     private fun setupListeners() {

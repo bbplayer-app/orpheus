@@ -38,27 +38,62 @@ export type OrpheusEvents = {
   onIsPlayingChanged(event: { status: boolean }): void;
 };
 
-declare class OrpheusModule extends NativeModule<OrpheusEvents> {
-  readonly position: number;
-  readonly duration: number;
-  readonly isPlaying: boolean;
-  readonly currentIndex: number;
-  readonly currentTrack: Track | null;
-  readonly shuffleMode: boolean;
+declare class OrpheusModule extends NativeModule<OrpheusEvents> {  
+  /** * 获取当前进度（秒）
+   */
+  getPosition(): Promise<number>;
 
-  getIndexTrack(index: number): Track | null;
+  /** * 获取总时长（秒）
+   */
+  getDuration(): Promise<number>;
+
+  /** * 获取是否正在播放
+   */
+  getIsPlaying(): Promise<boolean>;
+
+  /** * 获取当前播放索引
+   */
+  getCurrentIndex(): Promise<number>;
+
+  /** * 获取当前播放的 Track 对象
+   */
+  getCurrentTrack(): Promise<Track | null>;
+
+  /** * 获取随机模式状态
+   */
+  getShuffleMode(): Promise<boolean>;
+
+  /**
+   * 获取指定索引的 Track
+   */
+  getIndexTrack(index: number): Promise<Track | null>;
+
   setBilibiliCookie(cookie: string): void;
-  play(): void;
-  pause(): void;
-  clear(): void;
-  skipTo(index: number): void;
-  skipToNext(): void;
-  skipToPrevious(): void;
-  seekTo(seconds: number): void;
-  setRepeatMode(mode: RepeatMode): void;
-  setShuffleMode(enabled: boolean): void;
 
+  play(): Promise<void>;
+  
+  pause(): Promise<void>;
+  
+  clear(): Promise<void>;
+  
+  skipTo(index: number): Promise<void>;
+  
+  skipToNext(): Promise<void>;
+  
+  skipToPrevious(): Promise<void>;
+  
+  /**
+   * 跳转进度
+   * @param seconds 秒数
+   */
+  seekTo(seconds: number): Promise<void>;
+  
+  setRepeatMode(mode: RepeatMode): Promise<void>;
+  
+  setShuffleMode(enabled: boolean): Promise<void>;
+  
   getQueue(): Promise<Track[]>;
+  
   add(tracks: Track[]): Promise<void>;
 }
 

@@ -45,7 +45,7 @@ class OrpheusService : MediaLibraryService() {
                             val enableDolby = uri.getQueryParameter("dolby") == "1"
                             val enableHiRes = uri.getQueryParameter("hires") == "1"
 
-                            if (bvid == null || cid == null) {
+                            if (bvid == null) {
                                 throw IOException("Invalid Bilibili Params: bvid=$bvid, cid=$cid")
                             }
 

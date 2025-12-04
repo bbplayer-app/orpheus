@@ -4,7 +4,6 @@ import android.content.ComponentName
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.util.Log
 import androidx.core.net.toUri
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -16,6 +15,7 @@ import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
 import com.google.gson.Gson
+import expo.modules.kotlin.functions.Queues
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 
@@ -52,7 +52,8 @@ class ExpoOrpheusModule : Module() {
                 context,
                 ComponentName(context, OrpheusService::class.java)
             )
-            controllerFuture = MediaController.Builder(context, sessionToken).buildAsync()
+            controllerFuture = MediaController.Builder(context, sessionToken)
+                .setApplicationLooper(Looper.getMainLooper()).buildAsync()
 
             controllerFuture?.addListener({
                 try {
@@ -69,77 +70,89 @@ class ExpoOrpheusModule : Module() {
             controllerFuture?.let { MediaController.releaseFuture(it) }
         }
 
-        Property("position") {
+        AsyncFunction("getPosition") {
             controller?.currentPosition?.toDouble()?.div(1000.0) ?: 0.0
-        }
+        }.runOnQueue(Queues.MAIN)
 
-        Property("duration") {
+        AsyncFunction("getDuration") {
             val d = controller?.duration ?: C.TIME_UNSET
             if (d == C.TIME_UNSET) 0.0 else d.toDouble() / 1000.0
-        }
+        }.runOnQueue(Queues.MAIN)
 
-        Property("isPlaying") {
+        AsyncFunction("getIsPlaying") {
             controller?.isPlaying ?: false
-        }
+        }.runOnQueue(Queues.MAIN)
 
-        Property("currentIndex") {
+        AsyncFunction("getCurrentIndex") {
             controller?.currentMediaItemIndex ?: -1
-        }
+        }.runOnQueue(Queues.MAIN)
 
-        Property("currentTrack") {
-            val player = controller ?: return@Property null
-            val currentItem = player.currentMediaItem ?: return@Property null
+        AsyncFunction("getCurrentTrack") {
+            val player = controller ?: return@AsyncFunction null
+            val currentItem = player.currentMediaItem ?: return@AsyncFunction null
 
             mediaItemToTrackRecord(currentItem)
-        }
+        }.runOnQueue(Queues.MAIN)
 
-        Property("shuffleMode") {
+        AsyncFunction("getShuffleMode") {
             controller?.shuffleModeEnabled
-        }
+        }.runOnQueue(Queues.MAIN)
 
-        Function("getIndexTrack") { index: Int ->
+        AsyncFunction("getIndexTrack") { index: Int ->
             controller?.getMediaItemAt(index)
-        }
+        }.runOnQueue(Queues.MAIN)
 
         Function("setBilibiliCookie") { cookie: String ->
             OrpheusConfig.bilibiliCookie = cookie
         }
 
-        Function("play") {
-            controller?.play()
-        }
+        AsyncFunction("play") {
+            val player = controller
+            if (player != null) {
+                // 获取 player 真正归属的 Looper
+                val playerLooper = player.applicationLooper
 
-        Function("pause") {
+                if (Looper.myLooper() == playerLooper) {
+                    player.play()
+                } else {
+                    Handler(playerLooper).post {
+                        player.play()
+                    }
+                }
+            }
+        }.runOnQueue(Queues.MAIN)
+
+        AsyncFunction("pause") {
             controller?.pause()
-        }
+        }.runOnQueue(Queues.MAIN)
 
-        Function("clear") {
+        AsyncFunction("clear") {
             controller?.clearMediaItems()
-        }
+        }.runOnQueue(Queues.MAIN)
 
-        Function("skipTo") { index: Int ->
+        AsyncFunction("skipTo") { index: Int ->
             // 跳转到指定索引的开头
             controller?.seekTo(index, C.TIME_UNSET)
-        }
+        }.runOnQueue(Queues.MAIN)
 
-        Function("skipToNext") {
+        AsyncFunction("skipToNext") {
             if (controller?.hasNextMediaItem() == true) {
                 controller?.seekToNextMediaItem()
             }
-        }
+        }.runOnQueue(Queues.MAIN)
 
-        Function("skipToPrevious") {
+        AsyncFunction("skipToPrevious") {
             if (controller?.hasPreviousMediaItem() == true) {
                 controller?.seekToPreviousMediaItem()
             }
-        }
+        }.runOnQueue(Queues.MAIN)
 
-        Function("seekTo") { seconds: Double ->
+        AsyncFunction("seekTo") { seconds: Double ->
             val ms = (seconds * 1000).toLong()
             controller?.seekTo(ms)
-        }
+        }.runOnQueue(Queues.MAIN)
 
-        Function("setRepeatMode") { mode: Int ->
+        AsyncFunction("setRepeatMode") { mode: Int ->
             // mode: 0=OFF, 1=TRACK, 2=QUEUE
             val repeatMode = when (mode) {
                 1 -> Player.REPEAT_MODE_ONE
@@ -147,11 +160,11 @@ class ExpoOrpheusModule : Module() {
                 else -> Player.REPEAT_MODE_OFF
             }
             controller?.repeatMode = repeatMode
-        }
+        }.runOnQueue(Queues.MAIN)
 
-        Function("setShuffleMode") { enabled: Boolean ->
+        AsyncFunction("setShuffleMode") { enabled: Boolean ->
             controller?.shuffleModeEnabled = enabled
-        }
+        }.runOnQueue(Queues.MAIN)
 
         AsyncFunction("getQueue") {
             val player = controller ?: return@AsyncFunction emptyList<TrackRecord>()
@@ -167,45 +180,53 @@ class ExpoOrpheusModule : Module() {
         }
 
         AsyncFunction("add") { tracks: List<TrackRecord> ->
-            Log.e(TAG, "add ${tracks.size} to media")
-
-            val player = controller
-            if (player == null) {
-                Log.e("Orpheus", "❌ 严重错误: Controller 为 null！Service 可能没启动或连接失败。")
-                // 抛出错误让 JS 端能 catch 到
-                throw IllegalStateException("Controller is not ready yet!")
-            }
-            try {
-                val mediaItems = tracks.map { track ->
-                    Log.e(TAG, "0")
+            // 1. 【后台线程】执行：JSON 转换、Metadata 构建 (耗时操作在这里做，不卡 UI)
+            // 这里不需要改，继续在当前线程跑
+            val mediaItems = tracks.mapNotNull { track ->
+                try {
                     val trackJson = gson.toJson(track)
-
                     val extras = Bundle()
-                    Log.e(TAG, "1")
                     extras.putString("track_json", trackJson)
+
+                    val artUri =
+                        if (!track.artwork.isNullOrEmpty()) track.artwork!!.toUri() else null
+
                     val metadata = MediaMetadata.Builder()
                         .setTitle(track.title)
                         .setArtist(track.artist)
-                        .setArtworkUri(if (track.artwork != null) track.artwork!!.toUri() else null)
+                        .setArtworkUri(artUri)
                         .setExtras(extras)
                         .build()
-                    Log.e(TAG, "2")
+
                     MediaItem.Builder()
                         .setMediaId(track.id)
-                        .setUri(track.url)
+                        .setUri(track.url ?: "")
                         .setMediaMetadata(metadata)
                         .build()
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                    null
                 }
+            }
 
-                Log.d("Orpheus", "✅ 成功添加到播放器，当前状态: ${player.playbackState}")
-                controller?.addMediaItems(mediaItems)
-                if (controller?.playbackState == Player.STATE_IDLE) {
-                    controller?.prepare()
+            val player = controller
+            if (player != null) {
+                // 获取 player 真正归属的 Looper
+                val playerLooper = player.applicationLooper
+
+                if (Looper.myLooper() == playerLooper) {
+                    player.addMediaItems(mediaItems)
+                    if (player.playbackState == Player.STATE_IDLE) {
+                        player.prepare()
+                    }
+                } else {
+                    Handler(playerLooper).post {
+                        player.addMediaItems(mediaItems)
+                        if (player.playbackState == Player.STATE_IDLE) {
+                            player.prepare()
+                        }
+                    }
                 }
-
-                Log.e(TAG, controller?.mediaItemCount.toString())
-            } catch (e: Error) {
-                Log.e(TAG, e.toString())
             }
         }
     }

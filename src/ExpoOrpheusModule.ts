@@ -1,5 +1,4 @@
 import { requireNativeModule, NativeModule } from "expo-modules-core";
-import { get } from "react-native/Libraries/TurboModule/TurboModuleRegistry";
 
 export enum PlaybackState {
   IDLE = 1,

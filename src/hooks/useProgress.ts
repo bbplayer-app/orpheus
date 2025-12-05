@@ -33,12 +33,12 @@ export function useProgress() {
   };
 
   const manualSync = () => {
-    Promise.all([Orpheus.getPosition(), Orpheus.getDuration()])
-      .then(([pos, dur]) => {
+    Promise.all([Orpheus.getPosition(), Orpheus.getDuration(), Orpheus.getBuffered()])
+      .then(([pos, dur, buf]) => {
         setProgress((prev) => ({
-          ...prev,
           position: pos,
           duration: dur,
+          buffered: buf,
         }));
       })
       .catch((e) => console.warn("同步最新进度失败", e));
@@ -48,7 +48,6 @@ export function useProgress() {
     manualSync();
     startListening();
 
-    // === 监听 App 前后台切换 ===
     const subscription = AppState.addEventListener(
       "change",
       (nextAppState: AppStateStatus) => {

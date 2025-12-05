@@ -79,6 +79,10 @@ class ExpoOrpheusModule : Module() {
             if (d == C.TIME_UNSET) 0.0 else d.toDouble() / 1000.0
         }.runOnQueue(Queues.MAIN)
 
+        AsyncFunction("getBuffered") {
+            controller?.bufferedPosition?.toDouble()?.div(1000.0) ?: 0.0
+        }.runOnQueue(Queues.MAIN)
+
         AsyncFunction("getIsPlaying") {
             controller?.isPlaying ?: false
         }.runOnQueue(Queues.MAIN)
@@ -174,6 +178,16 @@ class ExpoOrpheusModule : Module() {
             controller?.shuffleModeEnabled = enabled
         }.runOnQueue(Queues.MAIN)
 
+        AsyncFunction("getRepeatMode") {
+            controller?.repeatMode
+        }.runOnQueue(Queues.MAIN)
+
+        AsyncFunction("removeTrack") { index: Int ->
+            if (index >= 0 && index < (controller?.mediaItemCount ?: 0)) {
+                controller?.removeMediaItem(index)
+            }
+        }
+
         AsyncFunction("getQueue") {
             val player = controller ?: return@AsyncFunction emptyList<TrackRecord>()
             val count = player.mediaItemCount
@@ -187,9 +201,7 @@ class ExpoOrpheusModule : Module() {
             return@AsyncFunction queue
         }.runOnQueue(Queues.MAIN)
 
-        AsyncFunction("add") { tracks: List<TrackRecord> ->
-            // 1. 【后台线程】执行：JSON 转换、Metadata 构建 (耗时操作在这里做，不卡 UI)
-            // 这里不需要改，继续在当前线程跑
+        AsyncFunction("addToEnd") { tracks: List<TrackRecord> ->
             val mediaItems = tracks.mapNotNull { track ->
                 try {
                     val trackJson = gson.toJson(track)
@@ -208,7 +220,7 @@ class ExpoOrpheusModule : Module() {
 
                     MediaItem.Builder()
                         .setMediaId(track.id)
-                        .setUri(track.url ?: "")
+                        .setUri(track.url)
                         .setMediaMetadata(metadata)
                         .build()
                 } catch (e: Exception) {
@@ -217,24 +229,61 @@ class ExpoOrpheusModule : Module() {
                 }
             }
 
-            val player = controller
-            if (player != null) {
-                // 获取 player 真正归属的 Looper
-                val playerLooper = player.applicationLooper
+            val player = controller ?: return@AsyncFunction
+            player.addMediaItems(mediaItems)
+            if (player.playbackState == Player.STATE_IDLE) {
+                player.prepare()
+            }
+        }.runOnQueue(Queues.MAIN)
 
-                if (Looper.myLooper() == playerLooper) {
-                    player.addMediaItems(mediaItems)
-                    if (player.playbackState == Player.STATE_IDLE) {
-                        player.prepare()
-                    }
-                } else {
-                    Handler(playerLooper).post {
-                        player.addMediaItems(mediaItems)
-                        if (player.playbackState == Player.STATE_IDLE) {
-                            player.prepare()
-                        }
-                    }
+        AsyncFunction("playNext") { track: TrackRecord ->
+            val player = controller ?: return@AsyncFunction
+
+            val trackJson = gson.toJson(track)
+            val extras = Bundle()
+            extras.putString("track_json", trackJson)
+            val artUri = if (!track.artwork.isNullOrEmpty()) track.artwork!!.toUri() else null
+
+            val metadata = MediaMetadata.Builder()
+                .setTitle(track.title)
+                .setArtist(track.artist)
+                .setArtworkUri(artUri)
+                .setExtras(extras)
+                .build()
+
+            val mediaItem = MediaItem.Builder()
+                .setMediaId(track.id)
+                .setUri(track.url)
+                .setMediaMetadata(metadata)
+                .build()
+
+            val currentId = player.currentMediaItem?.mediaId
+            val targetIndex = player.currentMediaItemIndex + 1
+
+            var existingIndex = -1
+            for (i in 0 until player.mediaItemCount) {
+                if (player.getMediaItemAt(i).mediaId == track.id) {
+                    existingIndex = i
+                    break
                 }
+            }
+
+            if (existingIndex != -1) {
+                if (existingIndex == player.currentMediaItemIndex) {
+                    return@AsyncFunction
+                }
+                val safeTargetIndex = targetIndex.coerceAtMost(player.mediaItemCount)
+
+                player.moveMediaItem(existingIndex, safeTargetIndex)
+
+            } else {
+                val safeTargetIndex = targetIndex.coerceAtMost(player.mediaItemCount)
+
+                player.addMediaItem(safeTargetIndex, mediaItem)
+            }
+
+            if (player.playbackState == Player.STATE_IDLE) {
+                player.prepare()
             }
         }.runOnQueue(Queues.MAIN)
     }

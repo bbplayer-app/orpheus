@@ -1,4 +1,5 @@
 import { requireNativeModule, NativeModule } from "expo-modules-core";
+import { get } from "react-native/Libraries/TurboModule/TurboModuleRegistry";
 
 export enum PlaybackState {
   IDLE = 1,
@@ -58,6 +59,11 @@ declare class OrpheusModule extends NativeModule<OrpheusEvents> {
   getDuration(): Promise<number>;
 
   /**
+   * 获取缓冲进度（秒）
+   */
+  getBuffered(): Promise<number>;
+
+  /**
    * 获取是否正在播放
    */
   getIsPlaying(): Promise<boolean>;
@@ -81,6 +87,8 @@ declare class OrpheusModule extends NativeModule<OrpheusEvents> {
    * 获取指定索引的 Track
    */
   getIndexTrack(index: number): Promise<Track | null>;
+
+  getRepeatMode(): Promise<RepeatMode>;
 
   setBilibiliCookie(cookie: string): void;
 
@@ -108,7 +116,19 @@ declare class OrpheusModule extends NativeModule<OrpheusEvents> {
 
   getQueue(): Promise<Track[]>;
 
-  add(tracks: Track[]): Promise<void>;
+  /**
+   * 添加到队列末尾，且不去重。
+   * @param tracks 
+   */
+  addToEnd(tracks: Track[]): Promise<void>;
+
+  /**
+   * 播放下一首
+   * @param track 
+   */
+  playNext(track: Track): Promise<void>;
+
+  removeTrack(index: number): Promise<void>;
 }
 
 export const Orpheus = requireNativeModule<OrpheusModule>("Orpheus");

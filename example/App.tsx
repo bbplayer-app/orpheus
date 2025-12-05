@@ -16,12 +16,9 @@ import { Orpheus, PlaybackState, RepeatMode, Track, TransitionReason } from 'exp
 // 屏幕宽度，用于计算进度条
 const { width } = Dimensions.get('window');
 
-// 模拟测试数据
-// 记得把那个伪协议链接里的 bvid 换成你真实存在的，不然解析会 404
 const TEST_TRACKS: Track[] = [
   {
     id: 'test_bili_fake',
-    // 这里的参数需要配合你的 BilibiliRepository 逻辑
     url: 'orpheus://bilibili?bvid=BV1WPS4BuEEb',
     title: 'Bilibili Test (Fake)',
     artist: 'Orpheus Repo',
@@ -29,19 +26,24 @@ const TEST_TRACKS: Track[] = [
   },
   {
     id: 'test_bili_new1',
-    // 这里的参数需要配合你的 BilibiliRepository 逻辑
     url: 'orpheus://bilibili?bvid=BV1DzCABvEAV',
     title: 'lty',
     artist: 'Orpheus Repo',
     artwork: 'https://i2.hdslb.com/bfs/archive/1dc8b91a28f425835178bc5a399dbdbb6788d3ff.jpg',
   },
   {
-    id: 'test_bili_new1',
-    // 这里的参数需要配合你的 BilibiliRepository 逻辑
+    id: 'test_bili_new2',
     url: 'orpheus://bilibili?bvid=BV1NSC5BtEem',
-    title: 'lty',
+    title: '111',
     artist: 'Orpheus Repo',
     artwork: 'https://i1.hdslb.com/bfs/archive/e115f949947eabc57f626a5f4f81eeb3d468c63c.jpg',
+  },
+    {
+    id: 'test_bili_new3',
+    url: 'orpheus://bilibili?bvid=BV1mV411X7DZ&dolby=1&hires=1',
+    title: '"叫你妈妈带你去买玩具吧" 草东《大风吹》【Hi-Res 24bit/192kHz】',
+    artist: 'Orpheus Repo',
+    artwork: 'https://i1.hdslb.com/bfs/archive/554224b5870aad1353306f2fb8e788e3c22c4bae.jpg',
   },
 ];
 
@@ -55,6 +57,7 @@ export default function OrpheusTestScreen() {
   // 以前能直接读属性，现在这些状态得自己维护或者异步获取
   const [repeatMode, setRepeatMode] = useState<RepeatMode>(RepeatMode.OFF);
   const [shuffleMode, setShuffleMode] = useState(false);
+  const [transitionCount, setTransitionCount] = useState(0); // 仅用于测试切歌次数
 
   // --- 初始化与监听 ---
   useEffect(() => {
@@ -69,6 +72,7 @@ export default function OrpheusTestScreen() {
 
     const subTrack = Orpheus.addListener('onTrackTransition', async (event) => {
       console.log('Track Transition:', event);
+      setTransitionCount((c) => c + 1);
       // 切歌了，重新拉取当前歌曲信息
       await syncCurrentTrack();
     });
@@ -164,6 +168,7 @@ export default function OrpheusTestScreen() {
         Alert.alert('Get Index 0', 'Returned null (Queue might be empty)');
       }
     } catch (e: any) {
+      console.log(e.message)
       Alert.alert('Error', e.message);
     }
   };
@@ -290,8 +295,12 @@ export default function OrpheusTestScreen() {
              <Button title="Get Queue Info" onPress={async () => {
                // 简单测试一下获取队列
                const q = await Orpheus.getQueue();
+               console.log('Queue:', q);
                Alert.alert("Queue Info", `Count: ${q.length}`);
             }} />
+            <Text style={{ color: '#888', marginTop: 10 }}>
+              Track Transitions: {transitionCount}
+            </Text>
           </View>
         </View>
 

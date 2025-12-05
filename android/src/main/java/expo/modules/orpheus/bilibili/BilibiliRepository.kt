@@ -1,5 +1,6 @@
 package expo.modules.orpheus.bilibili
 
+import android.util.Log
 import expo.modules.orpheus.NetworkModule
 import java.io.IOException
 import java.text.SimpleDateFormat
@@ -7,6 +8,8 @@ import java.util.Date
 import java.util.Locale
 
 object BilibiliRepository {
+    val TAG = "Orpheus/BilibiliRepo"
+
     private val api: BilibiliApi by lazy {
         NetworkModule.retrofit.create(BilibiliApi::class.java)
     }
@@ -62,6 +65,8 @@ object BilibiliRepository {
             cidInternal = getFirstCid(bvid, cookie)
         }
 
+        Log.e(TAG, "resolve url: bvid: $bvid, cid: $cid, enableDolby: ")
+
         val rawParams = mapOf(
             "bvid" to bvid,
             "cid" to cidInternal,
@@ -98,10 +103,12 @@ object BilibiliRepository {
         }
 
         if (enableDolby && dash.dolby?.audio?.isNotEmpty() == true) {
+            Log.d(TAG, "select dolby source")
             return dash.dolby.audio[0].baseUrl
         }
 
         if (enableHiRes && dash.flac?.audio != null) {
+            Log.d(TAG, "select hires source")
             return dash.flac.audio.baseUrl
         }
 

@@ -99,7 +99,15 @@ class ExpoOrpheusModule : Module() {
         }.runOnQueue(Queues.MAIN)
 
         AsyncFunction("getIndexTrack") { index: Int ->
-            controller?.getMediaItemAt(index)
+            val player = controller ?: return@AsyncFunction null
+
+            if (index < 0 || index >= player.mediaItemCount) {
+                return@AsyncFunction null
+            }
+
+            val item = player.getMediaItemAt(index)
+
+            mediaItemToTrackRecord(item)
         }.runOnQueue(Queues.MAIN)
 
         Function("setBilibiliCookie") { cookie: String ->

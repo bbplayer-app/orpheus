@@ -107,7 +107,8 @@ class OrpheusService : MediaLibraryService() {
         super.onDestroy()
     }
 
-    var callback: MediaLibrarySession.Callback = object : MediaLibrarySession.Callback {
+    var callback: MediaLibrarySession.Callback = @UnstableApi
+    object : MediaLibrarySession.Callback {
         @OptIn(UnstableApi::class)
         override fun onConnect(
             session: MediaSession,

@@ -1,6 +1,6 @@
 {
   "name": "@roitium/expo-orpheus",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A player for bbplayer",
   "main": "build/index.js",
   "types": "build/index.d.ts",
@@ -27,14 +27,13 @@
   "author": "Roitium <65794453+roitium@users.noreply.github.com> (https://github.com/roitium)",
   "license": "MIT",
   "homepage": "https://github.com/bbplayer-app/orpheus#readme",
-  "dependencies": {
-    "prettier": "^3.7.4"
-  },
+  "dependencies": {},
   "devDependencies": {
     "@types/react": "~19.1.0",
     "expo": "^54.0.24",
     "expo-module-scripts": "^5.0.7",
-    "react-native": "0.81.5"
+    "react-native": "0.81.5",
+    "prettier": "^3.7.4"
   },
   "peerDependencies": {
     "expo": "*",

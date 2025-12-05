@@ -1,23 +1,23 @@
-import { requireNativeModule, NativeModule } from 'expo-modules-core';
+import { requireNativeModule, NativeModule } from "expo-modules-core";
 
 export enum PlaybackState {
   IDLE = 1,
   BUFFERING = 2,
   READY = 3,
-  ENDED = 4
+  ENDED = 4,
 }
 
 export enum RepeatMode {
   OFF = 0,
   TRACK = 1,
-  QUEUE = 2
+  QUEUE = 2,
 }
 
 export enum TransitionReason {
   REPEAT = 0,
   AUTO = 1,
   SEEK = 2,
-  PLAYLIST_CHANGED = 3
+  PLAYLIST_CHANGED = 3,
 }
 
 export interface Track {
@@ -32,34 +32,48 @@ export interface Track {
 
 export type OrpheusEvents = {
   onPlaybackStateChanged(event: { state: PlaybackState }): void;
-  onTrackTransition(event: { currentTrackId: string; previousTrackId?: string; reason: TransitionReason }): void;
+  onTrackTransition(event: {
+    currentTrackId: string;
+    previousTrackId?: string;
+    reason: TransitionReason;
+  }): void;
   onPlayerError(event: { code: string; message: string }): void;
-  onPositionUpdate(event: { position: number; duration: number; buffered: number }): void;
+  onPositionUpdate(event: {
+    position: number;
+    duration: number;
+    buffered: number;
+  }): void;
   onIsPlayingChanged(event: { status: boolean }): void;
 };
 
-declare class OrpheusModule extends NativeModule<OrpheusEvents> {  
-  /** * 获取当前进度（秒）
+declare class OrpheusModule extends NativeModule<OrpheusEvents> {
+  /**
+   * 获取当前进度（秒）
    */
   getPosition(): Promise<number>;
 
-  /** * 获取总时长（秒）
+  /**
+   * 获取总时长（秒）
    */
   getDuration(): Promise<number>;
 
-  /** * 获取是否正在播放
+  /**
+   * 获取是否正在播放
    */
   getIsPlaying(): Promise<boolean>;
 
-  /** * 获取当前播放索引
+  /**
+   * 获取当前播放索引
    */
   getCurrentIndex(): Promise<number>;
 
-  /** * 获取当前播放的 Track 对象
+  /**
+   * 获取当前播放的 Track 对象
    */
   getCurrentTrack(): Promise<Track | null>;
 
-  /** * 获取随机模式状态
+  /**
+   * 获取随机模式状态
    */
   getShuffleMode(): Promise<boolean>;
 
@@ -71,30 +85,30 @@ declare class OrpheusModule extends NativeModule<OrpheusEvents> {
   setBilibiliCookie(cookie: string): void;
 
   play(): Promise<void>;
-  
+
   pause(): Promise<void>;
-  
+
   clear(): Promise<void>;
-  
+
   skipTo(index: number): Promise<void>;
-  
+
   skipToNext(): Promise<void>;
-  
+
   skipToPrevious(): Promise<void>;
-  
+
   /**
    * 跳转进度
    * @param seconds 秒数
    */
   seekTo(seconds: number): Promise<void>;
-  
+
   setRepeatMode(mode: RepeatMode): Promise<void>;
-  
+
   setShuffleMode(enabled: boolean): Promise<void>;
-  
+
   getQueue(): Promise<Track[]>;
-  
+
   add(tracks: Track[]): Promise<void>;
 }
 
-export const Orpheus = requireNativeModule<OrpheusModule>('Orpheus');
+export const Orpheus = requireNativeModule<OrpheusModule>("Orpheus");

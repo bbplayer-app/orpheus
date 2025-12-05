@@ -11,7 +11,7 @@ import {
   Dimensions,
   ActivityIndicator,
 } from 'react-native';
-import { Orpheus, PlaybackState, RepeatMode, Track, TransitionReason } from 'expo-orpheus';
+import { Orpheus, PlaybackState, RepeatMode, Track, TransitionReason } from '@roitium/expo-orpheus';
 
 // 屏幕宽度，用于计算进度条
 const { width } = Dimensions.get('window');

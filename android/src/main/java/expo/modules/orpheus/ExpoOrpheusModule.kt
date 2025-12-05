@@ -201,7 +201,7 @@ class ExpoOrpheusModule : Module() {
             return@AsyncFunction queue
         }.runOnQueue(Queues.MAIN)
 
-        AsyncFunction("addToEnd") { tracks: List<TrackRecord> ->
+        AsyncFunction("addToEnd") { tracks: List<TrackRecord>, startFromId: String? ->
             val mediaItems = tracks.mapNotNull { track ->
                 try {
                     val trackJson = gson.toJson(track)
@@ -228,9 +228,24 @@ class ExpoOrpheusModule : Module() {
                     null
                 }
             }
-
             val player = controller ?: return@AsyncFunction
+            val initialSize = player.mediaItemCount
             player.addMediaItems(mediaItems)
+
+            if (!startFromId.isNullOrEmpty()) {
+                val relativeIndex = tracks.indexOfFirst { it.id == startFromId }
+
+                if (relativeIndex != -1) {
+                    val targetIndex = initialSize + relativeIndex
+
+                    player.seekTo(targetIndex, C.TIME_UNSET)
+                    player.prepare()
+                    player.play()
+
+                    return@AsyncFunction
+                }
+            }
+
             if (player.playbackState == Player.STATE_IDLE) {
                 player.prepare()
             }

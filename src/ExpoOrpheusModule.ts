@@ -117,13 +117,13 @@ declare class OrpheusModule extends NativeModule<OrpheusEvents> {
 
   /**
    * 添加到队列末尾，且不去重。
-   * @param tracks 
+   * @param tracks
    */
-  addToEnd(tracks: Track[]): Promise<void>;
+  addToEnd(tracks: Track[], startFromId?: string): Promise<void>;
 
   /**
    * 播放下一首
-   * @param track 
+   * @param track
    */
   playNext(track: Track): Promise<void>;
 

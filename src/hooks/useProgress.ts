@@ -33,7 +33,11 @@ export function useProgress() {
   };
 
   const manualSync = () => {
-    Promise.all([Orpheus.getPosition(), Orpheus.getDuration(), Orpheus.getBuffered()])
+    Promise.all([
+      Orpheus.getPosition(),
+      Orpheus.getDuration(),
+      Orpheus.getBuffered(),
+    ])
       .then(([pos, dur, buf]) => {
         setProgress((prev) => ({
           position: pos,

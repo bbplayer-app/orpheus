@@ -28,7 +28,7 @@ export function useCurrentTrack() {
       }
     });
 
-    const sub = Orpheus.addListener("onTrackTransition", async () => {
+    const sub = Orpheus.addListener("onTrackStarted", async () => {
       const { currentTrack, currentIndex } = await fetchTrack();
       if (isMounted) {
         setTrack(currentTrack);

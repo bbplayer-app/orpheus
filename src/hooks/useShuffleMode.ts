@@ -11,7 +11,7 @@ export function useShuffleMode() {
 
   useEffect(() => {
     refresh();
-    const sub = Orpheus.addListener("onTrackTransition", refresh);
+    const sub = Orpheus.addListener("onTrackStarted", refresh);
     return () => sub.remove();
   }, []);
 

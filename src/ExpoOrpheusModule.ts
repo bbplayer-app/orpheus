@@ -118,8 +118,10 @@ declare class OrpheusModule extends NativeModule<OrpheusEvents> {
   /**
    * 添加到队列末尾，且不去重。
    * @param tracks
+   * @param startFromId 可选，添加后立即播放该 ID 的曲目
+   * @param clearQueue 可选，是否清空当前队列
    */
-  addToEnd(tracks: Track[], startFromId?: string): Promise<void>;
+  addToEnd(tracks: Track[], startFromId?: string, clearQueue?: boolean): Promise<void>;
 
   /**
    * 播放下一首

@@ -8,6 +8,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.ResolvingDataSource
+import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.MediaLibraryService
@@ -29,8 +30,13 @@ class OrpheusService : MediaLibraryService() {
             .setUserAgent("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36")
             .setAllowCrossProtocolRedirects(true)
 
+        val cacheDataSourceFactory = CacheDataSource.Factory()
+            .setCache(DownloadCache.get(this))
+            .setUpstreamDataSourceFactory(httpDataSourceFactory)
+            .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+
         val resolvingDataSourceFactory = ResolvingDataSource.Factory(
-            httpDataSourceFactory,
+            cacheDataSourceFactory,
             object : ResolvingDataSource.Resolver {
                 // TODO: maybe we need to add a cache?
                 override fun resolveDataSpec(dataSpec: DataSpec): DataSpec {
@@ -64,6 +70,7 @@ class OrpheusService : MediaLibraryService() {
                             return dataSpec.buildUpon()
                                 .setUri(realUrl.toUri())
                                 .setHttpRequestHeaders(headers)
+                                .setKey(uri.toString())
                                 .build()
                         } catch (e: Exception) {
                             throw IOException("Resolve Url Failed: ${e.message}", e)

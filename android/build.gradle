@@ -14,38 +14,38 @@ useExpoPublishing()
 // Most of the time, you may like to manage the Android SDK versions yourself.
 def useManagedAndroidSdkVersions = false
 if (useManagedAndroidSdkVersions) {
-  useDefaultAndroidSdkVersions()
+    useDefaultAndroidSdkVersions()
 } else {
-  buildscript {
-    // Simple helper that allows the root project to override versions declared by this library.
-    ext.safeExtGet = { prop, fallback ->
-      rootProject.ext.has(prop) ? rootProject.ext.get(prop) : fallback
+    buildscript {
+        // Simple helper that allows the root project to override versions declared by this library.
+        ext.safeExtGet = { prop, fallback ->
+            rootProject.ext.has(prop) ? rootProject.ext.get(prop) : fallback
+        }
     }
-  }
-  project.android {
-    compileSdkVersion safeExtGet("compileSdkVersion", 36)
-    defaultConfig {
-      minSdkVersion safeExtGet("minSdkVersion", 24)
-      targetSdkVersion safeExtGet("targetSdkVersion", 36)
+    project.android {
+        compileSdkVersion safeExtGet("compileSdkVersion", 36)
+        defaultConfig {
+            minSdkVersion safeExtGet("minSdkVersion", 24)
+            targetSdkVersion safeExtGet("targetSdkVersion", 36)
+        }
     }
-  }
 }
 
 android {
-  namespace "expo.modules.orpheus"
-  defaultConfig {
-    versionCode 1
-    versionName "0.1.0"
-  }
-  lintOptions {
-    abortOnError false
-  }
+    namespace "expo.modules.orpheus"
+    defaultConfig {
+        versionCode 1
+        versionName "0.1.0"
+    }
+    lintOptions {
+        abortOnError false
+    }
 }
 
 dependencies {
     implementation "androidx.media3:media3-exoplayer:1.8.0"
     implementation "androidx.media3:media3-session:1.8.0"
-    implementation "com.squareup.retrofit2:retrofit:3.1.0-SNAPSHOT"
+    implementation "com.squareup.retrofit2:retrofit:2.9.0"
     implementation "com.google.code.gson:gson:2.13.2"
-    implementation "com.squareup.retrofit2:converter-gson:3.1.0-SNAPSHOT"
+    implementation "com.squareup.retrofit2:converter-gson:2.9.0"
 }

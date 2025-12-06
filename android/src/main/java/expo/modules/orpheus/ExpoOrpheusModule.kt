@@ -20,10 +20,6 @@ import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 
 class ExpoOrpheusModule : Module() {
-    companion object {
-        val TAG = "Orpheus"
-    }
-
     private var controllerFuture: ListenableFuture<MediaController>? = null
 
     private var controller: MediaController? = null
@@ -201,7 +197,7 @@ class ExpoOrpheusModule : Module() {
             return@AsyncFunction queue
         }.runOnQueue(Queues.MAIN)
 
-        AsyncFunction("addToEnd") { tracks: List<TrackRecord>, startFromId: String? ->
+        AsyncFunction("addToEnd") { tracks: List<TrackRecord>, startFromId: String?, clearQueue: Boolean? ->
             val mediaItems = tracks.mapNotNull { track ->
                 try {
                     val trackJson = gson.toJson(track)
@@ -229,6 +225,9 @@ class ExpoOrpheusModule : Module() {
                 }
             }
             val player = controller ?: return@AsyncFunction
+            if (clearQueue == true) {
+                player.clearMediaItems()
+            }
             val initialSize = player.mediaItemCount
             player.addMediaItems(mediaItems)
 
@@ -271,8 +270,6 @@ class ExpoOrpheusModule : Module() {
                 .setUri(track.url)
                 .setMediaMetadata(metadata)
                 .build()
-
-            val currentId = player.currentMediaItem?.mediaId
             val targetIndex = player.currentMediaItemIndex + 1
 
             var existingIndex = -1

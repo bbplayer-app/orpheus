@@ -32,10 +32,11 @@ export interface Track {
 
 export type OrpheusEvents = {
   onPlaybackStateChanged(event: { state: PlaybackState }): void;
-  onTrackTransition(event: {
-    currentTrackId: string;
-    previousTrackId?: string;
-    reason: TransitionReason;
+  onTrackStarted(event: { trackId: string; reason: TransitionReason }): void;
+  onTrackFinished(event: {
+    trackId: string;
+    finalPosition: number;
+    duration: number;
   }): void;
   onPlayerError(event: { code: string; message: string }): void;
   onPositionUpdate(event: {
@@ -121,7 +122,11 @@ declare class OrpheusModule extends NativeModule<OrpheusEvents> {
    * @param startFromId 可选，添加后立即播放该 ID 的曲目
    * @param clearQueue 可选，是否清空当前队列
    */
-  addToEnd(tracks: Track[], startFromId?: string, clearQueue?: boolean): Promise<void>;
+  addToEnd(
+    tracks: Track[],
+    startFromId?: string,
+    clearQueue?: boolean
+  ): Promise<void>;
 
   /**
    * 播放下一首

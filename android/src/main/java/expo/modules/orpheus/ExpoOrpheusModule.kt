@@ -29,6 +29,11 @@ class ExpoOrpheusModule : Module() {
     // 记录上一首歌曲的 ID，用于在切歌时发送给 JS
     private var lastMediaId: String? = null
 
+    private var currentTrackDuration: Long = 0L
+
+    // 用来暂存上一首歌曲切歌瞬间的进度
+    private var lastTrackFinalPosition: Long = 0L
+
     val gson = Gson()
 
     override fun definition() = ModuleDefinition {
@@ -36,10 +41,11 @@ class ExpoOrpheusModule : Module() {
 
         Events(
             "onPlaybackStateChanged",
-            "onTrackTransition",
             "onPlayerError",
             "onPositionUpdate",
-            "onIsPlayingChanged"
+            "onIsPlayingChanged",
+            "onTrackFinished",
+            "onTrackStarted"
         )
 
         OnCreate {
@@ -307,19 +313,37 @@ class ExpoOrpheusModule : Module() {
              * 核心：处理切歌、播放结束逻辑
              */
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-                val currentTrackId = mediaItem?.mediaId ?: ""
-                Player.MEDIA_ITEM_TRANSITION_REASON_AUTO
+                val newId = mediaItem?.mediaId ?: ""
 
                 sendEvent(
-                    "onTrackTransition", mapOf(
-                        "currentTrackId" to currentTrackId,
-                        "previousTrackId" to lastMediaId, // 上一首歌是什么
+                    "onTrackStarted", mapOf(
+                        "trackId" to newId,
                         "reason" to reason
                     )
                 )
 
-                // 更新本地记录，为下一次切歌做准备
-                lastMediaId = currentTrackId
+                lastMediaId = newId
+                currentTrackDuration = 0L
+            }
+
+            override fun onPositionDiscontinuity(
+                oldPosition: Player.PositionInfo,
+                newPosition: Player.PositionInfo,
+                reason: Int
+            ) {
+                Player.DISCONTINUITY_REASON_SEEK_ADJUSTMENT
+                if (oldPosition.mediaItemIndex != newPosition.mediaItemIndex) {
+                    val lastMediaItem =
+                        controller?.getMediaItemAt(oldPosition.mediaItemIndex) ?: return
+
+                    sendEvent(
+                        "onTrackFinished", mapOf(
+                            "trackId" to lastMediaItem.mediaId,
+                            "finalPosition" to oldPosition.positionMs / 1000.0,
+                            "duration" to currentTrackDuration / 1000.0,
+                        )
+                    )
+                }
             }
 
             /**
@@ -332,6 +356,11 @@ class ExpoOrpheusModule : Module() {
                         "state" to state
                     )
                 )
+
+                if (state == Player.STATE_READY) {
+                    val d = controller?.duration
+                    if (d != C.TIME_UNSET && d != null) currentTrackDuration = d
+                }
 
                 updateProgressRunnerState()
             }

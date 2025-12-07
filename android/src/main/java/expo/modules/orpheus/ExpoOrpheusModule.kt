@@ -326,7 +326,7 @@ class ExpoOrpheusModule : Module() {
                 context,
                 OrpheusDownloadService::class.java,
                 downloadRequest,
-                true
+                false
             )
         }
 
@@ -340,7 +340,7 @@ class ExpoOrpheusModule : Module() {
                     context,
                     OrpheusDownloadService::class.java,
                     downloadRequest,
-                    true
+                    false
                 )
             }
             return@AsyncFunction

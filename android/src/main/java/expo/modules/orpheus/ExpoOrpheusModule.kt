@@ -45,6 +45,7 @@ class ExpoOrpheusModule : Module() {
 
     // 记录上一首歌曲的 ID，用于在切歌时发送给 JS
     private var lastMediaId: String? = null
+    private var lastTrackFinishedAt: Long = 0
 
     private val durationCache = mutableMapOf<String, Long>()
 
@@ -173,6 +174,7 @@ class ExpoOrpheusModule : Module() {
         AsyncFunction("clear") {
             checkController()
             controller?.clearMediaItems()
+            durationCache.clear()
         }.runOnQueue(Queues.MAIN)
 
         AsyncFunction("skipTo") { index: Int ->
@@ -290,6 +292,7 @@ class ExpoOrpheusModule : Module() {
             val player = controller ?: return@AsyncFunction
             if (clearQueue == true) {
                 player.clearMediaItems()
+                durationCache.clear()
             }
             val initialSize = player.mediaItemCount
             player.addMediaItems(mediaItems)
@@ -488,6 +491,10 @@ class ExpoOrpheusModule : Module() {
                 val mediaId = currentItem.mediaId
 
                 val duration = player.duration
+                Log.d(
+                    "Orpheus",
+                    "onTimelineChanged: reason: $reason mediaId: $mediaId duration: $duration"
+                )
 
                 if (duration != C.TIME_UNSET && duration > 0) {
                     durationCache[mediaId] = duration
@@ -499,17 +506,23 @@ class ExpoOrpheusModule : Module() {
                 newPosition: Player.PositionInfo,
                 reason: Int
             ) {
+                val isAutoTransition = reason == Player.DISCONTINUITY_REASON_AUTO_TRANSITION
                 val isIndexChanged = oldPosition.mediaItemIndex != newPosition.mediaItemIndex
+                val lastMediaItem = oldPosition.mediaItem ?: return
+                val currentTime = System.currentTimeMillis()
+                if ((currentTime - lastTrackFinishedAt) < 200) {
+                    return
+                }
 
-                val isSingleLoop = (oldPosition.mediaItemIndex == newPosition.mediaItemIndex) &&
-                        (reason == Player.DISCONTINUITY_REASON_AUTO_TRANSITION)
+                Log.d(
+                    "Orpheus",
+                    "onPositionDiscontinuity: isAutoTransition:$isAutoTransition isIndexChanged: $isIndexChanged durationCache:$durationCache"
+                )
 
-                if (isIndexChanged || isSingleLoop) {
-                    val lastMediaItem =
-                        controller?.getMediaItemAt(oldPosition.mediaItemIndex) ?: return
+                if (isAutoTransition || isIndexChanged) {
 
-                    // onPositionDiscontinuity 会被连续调用两次，且两次调用参数相同，很奇怪的行为，所以采用这种方式过滤.没值就直接返回，不发事件。
-                    val duration = durationCache.remove(lastMediaItem.mediaId) ?: return
+                    val duration = durationCache[lastMediaItem.mediaId] ?: return
+                    lastTrackFinishedAt = currentTime
 
                     sendEvent(
                         "onTrackFinished", mapOf(

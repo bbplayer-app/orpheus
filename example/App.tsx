@@ -385,9 +385,15 @@ export default function OrpheusTestScreen() {
              }} />
              <Button title="Get IDs Status" onPress={async () => {
                const ids = TEST_TRACKS.map(t => t.id);
-               const statusMap = await Orpheus.getDownloadsByIds(ids);
-               console.log('Status Map:', statusMap);
+               try{
+               const statusMap = await Orpheus.getDownloadStatusByIds(ids);
+                              console.log('Status Map:', statusMap);
                Alert.alert('Status Map', JSON.stringify(statusMap, null, 2));
+               }catch(e){
+                 Alert.alert('Get IDs Status', e.message);
+                 console.log(e)
+                 return
+               }
              }} />
              <Button title="Remove All DL" onPress={() => {
                Orpheus.removeAllDownloads();

@@ -9,12 +9,9 @@ import {
   SafeAreaView,
   Alert,
   Dimensions,
-  ActivityIndicator,
 } from 'react-native';
-import { Orpheus, PlaybackState, RepeatMode, Track, TransitionReason } from '@roitium/expo-orpheus';
-
-// 屏幕宽度，用于计算进度条
-const { width } = Dimensions.get('window');
+// 假设这些类型都是从你的包里导出的
+import { Orpheus, PlaybackState, RepeatMode, Track, TransitionReason, useCurrentTrack } from '@roitium/expo-orpheus';
 
 const TEST_TRACKS: Track[] = [
   {
@@ -38,10 +35,10 @@ const TEST_TRACKS: Track[] = [
     artist: 'Orpheus Repo',
     artwork: 'https://i1.hdslb.com/bfs/archive/e115f949947eabc57f626a5f4f81eeb3d468c63c.jpg',
   },
-    {
+  {
     id: 'test_bili_new3',
     url: 'orpheus://bilibili?bvid=BV1mV411X7DZ&dolby=1&hires=1',
-    title: '"叫你妈妈带你去买玩具吧" 草东《大风吹》【Hi-Res 24bit/192kHz】',
+    title: '草东《大风吹》【Hi-Res】',
     artist: 'Orpheus Repo',
     artwork: 'https://i1.hdslb.com/bfs/archive/554224b5870aad1353306f2fb8e788e3c22c4bae.jpg',
   },
@@ -49,32 +46,47 @@ const TEST_TRACKS: Track[] = [
 
 export default function OrpheusTestScreen() {
   // --- State ---
-  const [currentTrack, setCurrentTrack] = useState<Track | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackState, setPlaybackState] = useState<PlaybackState>(PlaybackState.IDLE);
   const [progress, setProgress] = useState({ position: 0, duration: 0, buffered: 0 });
   
-  // 以前能直接读属性，现在这些状态得自己维护或者异步获取
   const [repeatMode, setRepeatMode] = useState<RepeatMode>(RepeatMode.OFF);
   const [shuffleMode, setShuffleMode] = useState(false);
-  const [transitionCount, setTransitionCount] = useState(0); // 仅用于测试切歌次数
+  const {track: currentTrack} = useCurrentTrack()
+  const [restorePlaybackPositionEnabled, setRestorePlaybackPositionEnabled] = useState(false);
+  
+  // 调试信息
+  const [lastEventLog, setLastEventLog] = useState<string>('Ready');
+
+  useEffect(() => {
+    setRestorePlaybackPositionEnabled(Orpheus.restorePlaybackPositionEnabled)
+  }, [restorePlaybackPositionEnabled]);
 
   // --- 初始化与监听 ---
   useEffect(() => {
     // 1. 挂载时同步一次完整状态
     syncFullState();
 
-    // 2. 注册监听器 (Expo Modules 写法)
+    // 2. 注册监听器
+    // 注意：事件名称必须严格对应 OrpheusEvents 类型中的定义
+
     const subState = Orpheus.addListener('onPlaybackStateChanged', (event) => {
       console.log('State Changed:', event.state);
       setPlaybackState(event.state);
     });
 
-    const subTrack = Orpheus.addListener('onTrackTransition', async (event) => {
-      console.log('Track Transition:', event);
-      setTransitionCount((c) => c + 1);
+    // 对应新定义的 onTrackStarted
+    const subTrackStart = Orpheus.addListener('onTrackStarted', async (event) => {
+      console.log('Track Started:', event);
+      // setLastEventLog(`Track Started: ${event.trackId} (Reason: ${TransitionReason[event.reason]})`);
       // 切歌了，重新拉取当前歌曲信息
-      await syncCurrentTrack();
+      console.log(`Track Started: ${event.trackId} (Reason: ${TransitionReason[event.reason]})`);
+    });
+
+    // 对应新定义的 onTrackFinished (调试用)
+    const subTrackFinish = Orpheus.addListener('onTrackFinished', (event) => {
+      console.log('Track Finished:', event);
+      setLastEventLog(`Track Finished: ${event.trackId}`);
     });
 
     const subPlaying = Orpheus.addListener('onIsPlayingChanged', (event) => {
@@ -82,7 +94,6 @@ export default function OrpheusTestScreen() {
     });
 
     const subProgress = Orpheus.addListener('onPositionUpdate', (event) => {
-      // 进度更新频率较高，直接 set state
       setProgress({
         position: event.position,
         duration: event.duration,
@@ -92,11 +103,13 @@ export default function OrpheusTestScreen() {
 
     const subError = Orpheus.addListener('onPlayerError', (event) => {
       Alert.alert('播放器报错', `Code: ${event.code}\nMessage: ${event.message}`);
+      setLastEventLog(`Error: ${event.code}`);
     });
 
     return () => {
       subState.remove();
-      subTrack.remove();
+      // subTrackStart.remove();
+      subTrackFinish.remove();
       subPlaying.remove();
       subProgress.remove();
       subError.remove();
@@ -107,7 +120,7 @@ export default function OrpheusTestScreen() {
 
   const syncFullState = async () => {
     try {
-      await syncCurrentTrack();
+      // await syncCurrentTrack();
       
       const playing = await Orpheus.getIsPlaying();
       setIsPlaying(playing);
@@ -115,19 +128,12 @@ export default function OrpheusTestScreen() {
       const shuffle = await Orpheus.getShuffleMode();
       setShuffleMode(shuffle);
       
-      // 注意：你的接口定义里好像漏了 getRepeatMode，如果原生没给 getter，JS 这边只能默认 OFF 或自己记录
-      // 这里暂时只同步其他状态
-    } catch (e) {
-      console.error("Sync State Error:", e);
-    }
-  };
+      const repeat = await Orpheus.getRepeatMode();
+      setRepeatMode(repeat);
 
-  const syncCurrentTrack = async () => {
-    try {
-      const track = await Orpheus.getCurrentTrack();
-      setCurrentTrack(track);
-    } catch (e) {
-      console.error("Sync Track Error:", e);
+    } catch (e: any) {
+      console.error("Sync State Error:", e);
+      setLastEventLog(`Sync Error: ${e.message}`);
     }
   };
 
@@ -135,14 +141,11 @@ export default function OrpheusTestScreen() {
 
   const handlePlayPause = async () => {
     try {
-      // 因为 getIsPlaying 是异步的，这里依赖本地 state 可能会更快，
-      // 但为了准确，也可以再 await 一次，或者直接 toggle
       if (isPlaying) {
         await Orpheus.pause();
       } else {
         await Orpheus.play();
       }
-      // 状态更新会通过 onIsPlayingChanged 回调回来，这里不需要手动 setIsPlaying
     } catch (e: any) {
       Alert.alert("操作失败", e.message);
     }
@@ -150,17 +153,28 @@ export default function OrpheusTestScreen() {
 
   const handleAddTracks = async () => {
     try {
-      await Orpheus.add(TEST_TRACKS);
-      console.log('Tracks added');
-      // 加完歌可能想自动同步一下队列状态（如果 UI 有列表展示的话）
+      // API 变更：add -> addToEnd
+      // 第二个参数 startFromId，这里传 undefined 表示不立即切歌，或者传 TEST_TRACKS[0].id 立即播放
+      await Orpheus.addToEnd(TEST_TRACKS, undefined, false);
+      setLastEventLog('Tracks Added to End');
+      Alert.alert('Success', 'Tracks added to queue');
     } catch (e: any) {
       Alert.alert("添加失败", e.message);
     }
   };
 
+  const handleClearAndPlay = async () => {
+    try {
+      // 测试 addToEnd 的 clearQueue 参数
+      await Orpheus.addToEnd(TEST_TRACKS, TEST_TRACKS[0].id, true);
+      setLastEventLog('Queue Cleared & New Tracks Playing');
+    } catch (e: any) {
+      Alert.alert("操作失败", e.message);
+    }
+  };
+
   const handleTestIndexTrack = async () => {
     try {
-      // 测试 getIndexTrack (异步)
       const track = await Orpheus.getIndexTrack(0);
       if (track) {
         Alert.alert('Get Index 0 Success', `Title: ${track.title}\nID: ${track.id}`);
@@ -168,26 +182,40 @@ export default function OrpheusTestScreen() {
         Alert.alert('Get Index 0', 'Returned null (Queue might be empty)');
       }
     } catch (e: any) {
-      console.log(e.message)
       Alert.alert('Error', e.message);
     }
   };
 
   const toggleRepeat = async () => {
-    const nextMode = (repeatMode + 1) % 3;
+    const nextMode = (repeatMode + 1) % 3; // 0, 1, 2 循环
     await Orpheus.setRepeatMode(nextMode);
-    setRepeatMode(nextMode); // 本地乐观更新
+    // 虽然可以等 UI 自动更新，但为了反应快，这里先 set 一下
+    setRepeatMode(nextMode);
   };
 
   const toggleShuffle = async () => {
     const nextState = !shuffleMode;
     await Orpheus.setShuffleMode(nextState);
-    setShuffleMode(nextState); // 本地乐观更新
+    setShuffleMode(nextState);
   };
+
+  const handleRemoveCurrent = async () => {
+    try {
+      const idx = await Orpheus.getCurrentIndex();
+      if (idx !== -1) {
+        await Orpheus.removeTrack(idx);
+        setLastEventLog(`Removed track at index ${idx}`);
+      } else {
+        Alert.alert("无法移除", "当前没有播放索引");
+      }
+    } catch (e: any) {
+      Alert.alert("Error", e.message);
+    }
+  }
 
   // 格式化时间 mm:ss
   const formatTime = (seconds: number) => {
-    if (!seconds || isNaN(seconds)) return "0:00";
+    if (!seconds || isNaN(seconds) || seconds < 0) return "0:00";
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
     return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
@@ -225,6 +253,7 @@ export default function OrpheusTestScreen() {
             {currentTrack?.artist || 'Orpheus Player'}
           </Text>
           <Text style={styles.trackId}>ID: {currentTrack?.id || '-'}</Text>
+          <Text style={styles.debugText}>{lastEventLog}</Text>
         </View>
 
         {/* 3. 进度条 */}
@@ -234,14 +263,14 @@ export default function OrpheusTestScreen() {
             <View 
               style={[
                 styles.progressBarBuffered, 
-                { width: `${progress.duration > 0 ? (progress.buffered / progress.duration) * 100 : 0}%` }
+                { width: `${progress.duration > 0 ? Math.min((progress.buffered / progress.duration) * 100, 100) : 0}%` }
               ]} 
             />
             {/* 播放进度 (绿色) */}
             <View 
               style={[
                 styles.progressBarFill, 
-                { width: `${progressPercent}%` }
+                { width: `${Math.min(progressPercent, 100)}%` }
               ]} 
             />
           </View>
@@ -282,25 +311,54 @@ export default function OrpheusTestScreen() {
 
         {/* 6. 功能测试区 */}
         <View style={styles.actionsContainer}>
-          <Text style={styles.sectionTitle}>API Tests</Text>
-          
+          <Text style={styles.sectionTitle}>Queue API</Text>
           <View style={styles.grid}>
-            <Button title="Add Test Tracks" onPress={handleAddTracks} />
+            <Button title="Add to End" onPress={handleAddTracks} />
+            <Button title="Clear & Play New" onPress={handleClearAndPlay} primary />
             <Button title="Clear Queue" onPress={() => Orpheus.clear()} danger />
+            <Button title="Remove Current" onPress={handleRemoveCurrent} danger />
+          </View>
+
+          <Text style={[styles.sectionTitle, { marginTop: 15 }]}>Info & Seek</Text>
+          <View style={styles.grid}>
+            <Button title="Log Queue" onPress={async () => {
+               const q = await Orpheus.getQueue();
+               console.log('Current Queue:', q);
+               setLastEventLog(`Queue Length: ${q.length}`);
+            }} />
             <Button title="Get Track [0]" onPress={handleTestIndexTrack} />
             
             <Button title="Seek +15s" onPress={() => {
               Orpheus.seekTo(progress.position + 15);
             }} />
-             <Button title="Get Queue Info" onPress={async () => {
-               // 简单测试一下获取队列
-               const q = await Orpheus.getQueue();
-               console.log('Queue:', q);
-               Alert.alert("Queue Info", `Count: ${q.length}`);
+            <Button title="Seek to 0s" onPress={() => {
+              Orpheus.seekTo(0);
             }} />
-            <Text style={{ color: '#888', marginTop: 10 }}>
-              Track Transitions: {transitionCount}
-            </Text>
+
+            <Button title={(restorePlaybackPositionEnabled ? 'Disabled' : 'Enabled') + "Restore Playback Position"} onPress={() => {
+              Orpheus.setRestorePlaybackPositionEnabled(true);
+              setRestorePlaybackPositionEnabled(Orpheus.restorePlaybackPositionEnabled)
+            }} />
+
+            <Button title="Set Sleep Timer" onPress={() => {
+              Orpheus.setSleepTimer(10000);
+            }} />
+            <Button title="Get Sleep Timer End Time" onPress={async () => {
+              try{
+              const endTime = await Orpheus.getSleepTimerEndTime();
+              if (endTime) {
+                Alert.alert('Sleep Timer End Time', `${endTime / 1000}s`);
+              } else {
+                Alert.alert('Sleep Timer End Time', 'Not Set');
+              }
+            }catch(e){
+              Alert.alert('Sleep Timer End Time', e.message);
+              console.log(e)
+            }
+            }} />
+            <Button title="Cancel Sleep Timer" onPress={() => {
+              Orpheus.cancelSleepTimer();
+            }} />
           </View>
         </View>
 
@@ -345,11 +403,12 @@ const styles = StyleSheet.create({
   stateTag: { color: '#1DB954', fontSize: 12, borderWidth: 1, borderColor: '#1DB954', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
 
   artworkContainer: { alignItems: 'center', marginBottom: 25 },
-  artwork: { width: 240, height: 240, borderRadius: 12, marginBottom: 20, backgroundColor: '#000' },
+  artwork: { width: 240, height: 240, borderRadius: 12, marginBottom: 15, backgroundColor: '#000' },
   artworkPlaceholder: { backgroundColor: '#222', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#333' },
   title: { color: '#fff', fontSize: 22, fontWeight: 'bold', textAlign: 'center', marginBottom: 5 },
   artist: { color: '#bbb', fontSize: 16, marginBottom: 5 },
-  trackId: { color: '#444', fontSize: 10, fontFamily: 'monospace' },
+  trackId: { color: '#444', fontSize: 10, fontFamily: 'monospace', marginBottom: 5 },
+  debugText: { color: '#e5e5e5', fontSize: 10, fontFamily: 'monospace', backgroundColor: '#333', padding: 4, borderRadius: 4, marginTop: 5},
 
   progressContainer: { marginBottom: 30 },
   progressBarBg: { height: 6, backgroundColor: '#333', borderRadius: 3, overflow: 'hidden', position: 'relative' },

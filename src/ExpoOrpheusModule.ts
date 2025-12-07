@@ -27,7 +27,10 @@ export interface Track {
   artist?: string;
   artwork?: string;
   duration?: number;
-  [key: string]: any;
+  loudness?: {
+    measured_i: number;
+    target_i: number;
+  }
 }
 
 export type OrpheusEvents = {
@@ -48,6 +51,9 @@ export type OrpheusEvents = {
 };
 
 declare class OrpheusModule extends NativeModule<OrpheusEvents> {
+  
+  restorePlaybackPositionEnabled: boolean;
+
   /**
    * 获取当前进度（秒）
    */
@@ -91,6 +97,8 @@ declare class OrpheusModule extends NativeModule<OrpheusEvents> {
   getRepeatMode(): Promise<RepeatMode>;
 
   setBilibiliCookie(cookie: string): void;
+  
+  setRestorePlaybackPositionEnabled(enabled: boolean): void;
 
   play(): Promise<void>;
 
@@ -135,6 +143,20 @@ declare class OrpheusModule extends NativeModule<OrpheusEvents> {
   playNext(track: Track): Promise<void>;
 
   removeTrack(index: number): Promise<void>;
+
+  /**
+   * 设置睡眠定时器
+   * @param durationMs 单位毫秒
+   */
+  setSleepTimer(durationMs: number): Promise<void>;
+
+  /**
+   * 获取睡眠定时器结束时间
+   * @returns 单位毫秒，如果没有设置则返回 null
+   */
+  getSleepTimerEndTime(): Promise<number | null>;
+
+  cancelSleepTimer(): Promise<void>;
 }
 
 export const Orpheus = requireNativeModule<OrpheusModule>("Orpheus");

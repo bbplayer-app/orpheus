@@ -4,20 +4,25 @@ import android.content.ComponentName
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import androidx.core.net.toUri
+import android.util.Log
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
-import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
+import androidx.media3.session.SessionCommand
+import androidx.media3.session.SessionResult
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
 import com.google.gson.Gson
+import expo.modules.kotlin.exception.CodedException
 import expo.modules.kotlin.functions.Queues
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
+import expo.modules.orpheus.models.TrackRecord
+import expo.modules.orpheus.utils.MediaItemStorer
+import expo.modules.orpheus.utils.toMediaItem
 
 class ExpoOrpheusModule : Module() {
     private var controllerFuture: ListenableFuture<MediaController>? = null
@@ -30,9 +35,6 @@ class ExpoOrpheusModule : Module() {
     private var lastMediaId: String? = null
 
     private var currentTrackDuration: Long = 0L
-
-    // 用来暂存上一首歌曲切歌瞬间的进度
-    private var lastTrackFinalPosition: Long = 0L
 
     val gson = Gson()
 
@@ -50,6 +52,7 @@ class ExpoOrpheusModule : Module() {
 
         OnCreate {
             val context = appContext.reactContext ?: return@OnCreate
+            MediaItemStorer.initialize(context)
             val sessionToken = SessionToken(
                 context,
                 ComponentName(context, OrpheusService::class.java)
@@ -68,32 +71,51 @@ class ExpoOrpheusModule : Module() {
         }
 
         OnDestroy {
-            stopProgressUpdater()
+            mainHandler.removeCallbacks(progressSendEventRunnable)
+            mainHandler.removeCallbacks(progressSaveRunnable)
             controllerFuture?.let { MediaController.releaseFuture(it) }
         }
 
+        Constant("restorePlaybackPositionEnabled") {
+            MediaItemStorer.isRestoreEnabled()
+        }
+
+        Function("setBilibiliCookie") { cookie: String ->
+            OrpheusConfig.bilibiliCookie = cookie
+        }
+
+        Function("setRestorePlaybackPositionEnabled") { enabled: Boolean ->
+            MediaItemStorer.setRestoreEnabled(enabled)
+        }
+
         AsyncFunction("getPosition") {
+            checkController()
             controller?.currentPosition?.toDouble()?.div(1000.0) ?: 0.0
         }.runOnQueue(Queues.MAIN)
 
         AsyncFunction("getDuration") {
+            checkController()
             val d = controller?.duration ?: C.TIME_UNSET
             if (d == C.TIME_UNSET) 0.0 else d.toDouble() / 1000.0
         }.runOnQueue(Queues.MAIN)
 
         AsyncFunction("getBuffered") {
+            checkController()
             controller?.bufferedPosition?.toDouble()?.div(1000.0) ?: 0.0
         }.runOnQueue(Queues.MAIN)
 
         AsyncFunction("getIsPlaying") {
+            checkController()
             controller?.isPlaying ?: false
         }.runOnQueue(Queues.MAIN)
 
         AsyncFunction("getCurrentIndex") {
+            checkController()
             controller?.currentMediaItemIndex ?: -1
         }.runOnQueue(Queues.MAIN)
 
         AsyncFunction("getCurrentTrack") {
+            checkController()
             val player = controller ?: return@AsyncFunction null
             val currentItem = player.currentMediaItem ?: return@AsyncFunction null
 
@@ -101,10 +123,12 @@ class ExpoOrpheusModule : Module() {
         }.runOnQueue(Queues.MAIN)
 
         AsyncFunction("getShuffleMode") {
+            checkController()
             controller?.shuffleModeEnabled
         }.runOnQueue(Queues.MAIN)
 
         AsyncFunction("getIndexTrack") { index: Int ->
+            checkController()
             val player = controller ?: return@AsyncFunction null
 
             if (index < 0 || index >= player.mediaItemCount) {
@@ -116,57 +140,49 @@ class ExpoOrpheusModule : Module() {
             mediaItemToTrackRecord(item)
         }.runOnQueue(Queues.MAIN)
 
-        Function("setBilibiliCookie") { cookie: String ->
-            OrpheusConfig.bilibiliCookie = cookie
-        }
-
         AsyncFunction("play") {
-            val player = controller
-            if (player != null) {
-                // 获取 player 真正归属的 Looper
-                val playerLooper = player.applicationLooper
-
-                if (Looper.myLooper() == playerLooper) {
-                    player.play()
-                } else {
-                    Handler(playerLooper).post {
-                        player.play()
-                    }
-                }
-            }
+            checkController()
+            controller?.play()
         }.runOnQueue(Queues.MAIN)
 
         AsyncFunction("pause") {
+            checkController()
             controller?.pause()
         }.runOnQueue(Queues.MAIN)
 
         AsyncFunction("clear") {
+            checkController()
             controller?.clearMediaItems()
         }.runOnQueue(Queues.MAIN)
 
         AsyncFunction("skipTo") { index: Int ->
             // 跳转到指定索引的开头
+            checkController()
             controller?.seekTo(index, C.TIME_UNSET)
         }.runOnQueue(Queues.MAIN)
 
         AsyncFunction("skipToNext") {
+            checkController()
             if (controller?.hasNextMediaItem() == true) {
                 controller?.seekToNextMediaItem()
             }
         }.runOnQueue(Queues.MAIN)
 
         AsyncFunction("skipToPrevious") {
+            checkController()
             if (controller?.hasPreviousMediaItem() == true) {
                 controller?.seekToPreviousMediaItem()
             }
         }.runOnQueue(Queues.MAIN)
 
         AsyncFunction("seekTo") { seconds: Double ->
+            checkController()
             val ms = (seconds * 1000).toLong()
             controller?.seekTo(ms)
         }.runOnQueue(Queues.MAIN)
 
         AsyncFunction("setRepeatMode") { mode: Int ->
+            checkController()
             // mode: 0=OFF, 1=TRACK, 2=QUEUE
             val repeatMode = when (mode) {
                 1 -> Player.REPEAT_MODE_ONE
@@ -177,20 +193,24 @@ class ExpoOrpheusModule : Module() {
         }.runOnQueue(Queues.MAIN)
 
         AsyncFunction("setShuffleMode") { enabled: Boolean ->
+            checkController()
             controller?.shuffleModeEnabled = enabled
         }.runOnQueue(Queues.MAIN)
 
         AsyncFunction("getRepeatMode") {
+            checkController()
             controller?.repeatMode
         }.runOnQueue(Queues.MAIN)
 
         AsyncFunction("removeTrack") { index: Int ->
+            checkController()
             if (index >= 0 && index < (controller?.mediaItemCount ?: 0)) {
                 controller?.removeMediaItem(index)
             }
         }
 
         AsyncFunction("getQueue") {
+            checkController()
             val player = controller ?: return@AsyncFunction emptyList<TrackRecord>()
             val count = player.mediaItemCount
             val queue = ArrayList<TrackRecord>(count)
@@ -203,32 +223,49 @@ class ExpoOrpheusModule : Module() {
             return@AsyncFunction queue
         }.runOnQueue(Queues.MAIN)
 
-        AsyncFunction("addToEnd") { tracks: List<TrackRecord>, startFromId: String?, clearQueue: Boolean? ->
-            val mediaItems = tracks.mapNotNull { track ->
-                try {
-                    val trackJson = gson.toJson(track)
-                    val extras = Bundle()
-                    extras.putString("track_json", trackJson)
+        AsyncFunction("setSleepTimer") { durationMs: Long ->
+            checkController()
+            val command = SessionCommand(CustomCommands.CMD_START_TIMER, Bundle.EMPTY)
+            val args = Bundle().apply {
+                putLong(CustomCommands.KEY_DURATION, durationMs)
+            }
 
-                    val artUri =
-                        if (!track.artwork.isNullOrEmpty()) track.artwork!!.toUri() else null
+            controller?.sendCustomCommand(command, args)
+        }.runOnQueue(Queues.MAIN)
 
-                    val metadata = MediaMetadata.Builder()
-                        .setTitle(track.title)
-                        .setArtist(track.artist)
-                        .setArtworkUri(artUri)
-                        .setExtras(extras)
-                        .build()
+        AsyncFunction("getSleepTimerEndTime") {
+            checkController()
 
-                    MediaItem.Builder()
-                        .setMediaId(track.id)
-                        .setUri(track.url)
-                        .setMediaMetadata(metadata)
-                        .build()
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                    null
+            val command = SessionCommand(CustomCommands.CMD_GET_REMAINING, Bundle.EMPTY)
+            val future = controller!!.sendCustomCommand(command, Bundle.EMPTY)
+
+            val result = try {
+                future.get()
+            } catch (e: Exception) {
+                throw CodedException("ERR_EXECUTION_FAILED", e.message, e)
+            }
+
+            if (result.resultCode == SessionResult.RESULT_SUCCESS) {
+                val extras = result.extras
+                if (extras.containsKey(CustomCommands.KEY_STOP_TIME)) {
+                    val stopTime = extras.getLong(CustomCommands.KEY_STOP_TIME)
+                    return@AsyncFunction stopTime
                 }
+            }
+
+            return@AsyncFunction null
+        }.runOnQueue(Queues.MAIN)
+
+        AsyncFunction("cancelSleepTimer") {
+            checkController()
+            val command = SessionCommand(CustomCommands.CMD_CANCEL_TIMER, Bundle.EMPTY)
+            controller?.sendCustomCommand(command, Bundle.EMPTY)
+        }.runOnQueue(Queues.MAIN)
+
+        AsyncFunction("addToEnd") { tracks: List<TrackRecord>, startFromId: String?, clearQueue: Boolean? ->
+            checkController()
+            val mediaItems = tracks.map { track ->
+                track.toMediaItem(gson)
             }
             val player = controller ?: return@AsyncFunction
             if (clearQueue == true) {
@@ -257,25 +294,10 @@ class ExpoOrpheusModule : Module() {
         }.runOnQueue(Queues.MAIN)
 
         AsyncFunction("playNext") { track: TrackRecord ->
+            checkController()
             val player = controller ?: return@AsyncFunction
 
-            val trackJson = gson.toJson(track)
-            val extras = Bundle()
-            extras.putString("track_json", trackJson)
-            val artUri = if (!track.artwork.isNullOrEmpty()) track.artwork!!.toUri() else null
-
-            val metadata = MediaMetadata.Builder()
-                .setTitle(track.title)
-                .setArtist(track.artist)
-                .setArtworkUri(artUri)
-                .setExtras(extras)
-                .build()
-
-            val mediaItem = MediaItem.Builder()
-                .setMediaId(track.id)
-                .setUri(track.url)
-                .setMediaMetadata(metadata)
-                .build()
+            val mediaItem = track.toMediaItem(gson)
             val targetIndex = player.currentMediaItemIndex + 1
 
             var existingIndex = -1
@@ -314,6 +336,7 @@ class ExpoOrpheusModule : Module() {
              */
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 val newId = mediaItem?.mediaId ?: ""
+                Log.e("Orpheus", "onMediaItemTransition: $reason")
 
                 sendEvent(
                     "onTrackStarted", mapOf(
@@ -324,6 +347,7 @@ class ExpoOrpheusModule : Module() {
 
                 lastMediaId = newId
                 currentTrackDuration = 0L
+                saveCurrentPosition()
             }
 
             override fun onPositionDiscontinuity(
@@ -391,7 +415,7 @@ class ExpoOrpheusModule : Module() {
         })
     }
 
-    private val progressRunnable = object : Runnable {
+    private val progressSendEventRunnable = object : Runnable {
         override fun run() {
             val player = controller ?: return
 
@@ -412,23 +436,25 @@ class ExpoOrpheusModule : Module() {
         }
     }
 
+    private val progressSaveRunnable = object : Runnable {
+        override fun run() {
+            saveCurrentPosition()
+            mainHandler.postDelayed(this, 5000)
+        }
+    }
+
     private fun updateProgressRunnerState() {
         val player = controller
         // 如果正在播放且状态是 READY，则开始轮询
         if (player != null && player.isPlaying && player.playbackState == Player.STATE_READY) {
-            startProgressUpdater()
+            mainHandler.removeCallbacks(progressSendEventRunnable)
+            mainHandler.removeCallbacks(progressSaveRunnable)
+            mainHandler.post(progressSaveRunnable)
+            mainHandler.post(progressSendEventRunnable)
         } else {
-            stopProgressUpdater()
+            mainHandler.removeCallbacks(progressSendEventRunnable)
+            mainHandler.removeCallbacks(progressSaveRunnable)
         }
-    }
-
-    private fun startProgressUpdater() {
-        mainHandler.removeCallbacks(progressRunnable)
-        mainHandler.post(progressRunnable)
-    }
-
-    private fun stopProgressUpdater() {
-        mainHandler.removeCallbacks(progressRunnable)
     }
 
     private fun mediaItemToTrackRecord(item: MediaItem): TrackRecord {
@@ -451,5 +477,21 @@ class ExpoOrpheusModule : Module() {
         track.artwork = item.mediaMetadata.artworkUri?.toString()
 
         return track
+    }
+
+    private fun saveCurrentPosition() {
+        val player = controller ?: return
+        if (player.playbackState != Player.STATE_IDLE) {
+            MediaItemStorer.savePosition(
+                player.currentMediaItemIndex,
+                player.currentPosition
+            )
+        }
+    }
+
+    private fun checkController() {
+        if (controller == null) {
+            throw ControllerNotInitializedException()
+        }
     }
 }

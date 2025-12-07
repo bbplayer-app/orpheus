@@ -20,6 +20,7 @@ object MediaItemStorer {
     private const val KEY_SAVED_POSITION = "saved_position"
 
 
+    @Synchronized
     fun initialize(context: Context) {
         if (kv == null) {
             MMKV.initialize(context)

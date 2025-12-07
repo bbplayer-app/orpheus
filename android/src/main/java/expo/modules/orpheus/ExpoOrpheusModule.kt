@@ -5,11 +5,18 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import androidx.annotation.OptIn
+import androidx.core.net.toUri
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.Timeline
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.offline.Download
+import androidx.media3.exoplayer.offline.DownloadManager
+import androidx.media3.exoplayer.offline.DownloadRequest
+import androidx.media3.exoplayer.offline.DownloadService
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionResult
@@ -22,15 +29,19 @@ import expo.modules.kotlin.functions.Queues
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import expo.modules.orpheus.models.TrackRecord
+import expo.modules.orpheus.utils.DownloadUtil
 import expo.modules.orpheus.utils.MediaItemStorer
 import expo.modules.orpheus.utils.toMediaItem
 
+@UnstableApi
 class ExpoOrpheusModule : Module() {
     private var controllerFuture: ListenableFuture<MediaController>? = null
 
     private var controller: MediaController? = null
 
     private val mainHandler = Handler(Looper.getMainLooper())
+
+    private var downloadManager: DownloadManager? = null
 
     // 记录上一首歌曲的 ID，用于在切歌时发送给 JS
     private var lastMediaId: String? = null
@@ -39,6 +50,7 @@ class ExpoOrpheusModule : Module() {
 
     val gson = Gson()
 
+    @OptIn(UnstableApi::class)
     override fun definition() = ModuleDefinition {
         Name("Orpheus")
 
@@ -48,7 +60,8 @@ class ExpoOrpheusModule : Module() {
             "onPositionUpdate",
             "onIsPlayingChanged",
             "onTrackFinished",
-            "onTrackStarted"
+            "onTrackStarted",
+            "onDownloadUpdated"
         )
 
         OnCreate {
@@ -56,7 +69,7 @@ class ExpoOrpheusModule : Module() {
             MediaItemStorer.initialize(context)
             val sessionToken = SessionToken(
                 context,
-                ComponentName(context, OrpheusService::class.java)
+                ComponentName(context, OrpheusMusicService::class.java)
             )
             controllerFuture = MediaController.Builder(context, sessionToken)
                 .setApplicationLooper(Looper.getMainLooper()).buildAsync()
@@ -69,12 +82,17 @@ class ExpoOrpheusModule : Module() {
                     e.printStackTrace()
                 }
             }, MoreExecutors.directExecutor())
+
+            downloadManager = DownloadUtil.getDownloadManager(context)
+            downloadManager?.addListener(downloadListener)
         }
 
         OnDestroy {
             mainHandler.removeCallbacks(progressSendEventRunnable)
             mainHandler.removeCallbacks(progressSaveRunnable)
+            mainHandler.removeCallbacks(downloadProgressRunnable)
             controllerFuture?.let { MediaController.releaseFuture(it) }
+            downloadManager?.removeListener(downloadListener)
         }
 
         Constant("restorePlaybackPositionEnabled") {
@@ -84,6 +102,7 @@ class ExpoOrpheusModule : Module() {
         Function("setBilibiliCookie") { cookie: String ->
             OrpheusConfig.bilibiliCookie = cookie
         }
+
 
         Function("setRestorePlaybackPositionEnabled") { enabled: Boolean ->
             MediaItemStorer.setRestoreEnabled(enabled)
@@ -292,41 +311,154 @@ class ExpoOrpheusModule : Module() {
             if (player.playbackState == Player.STATE_IDLE) {
                 player.prepare()
             }
-        }.runOnQueue(Queues.MAIN)
+        }
 
-        AsyncFunction("playNext") { track: TrackRecord ->
-            checkController()
-            val player = controller ?: return@AsyncFunction
+        AsyncFunction("downloadTrack") { track: TrackRecord ->
+            val context = appContext.reactContext ?: return@AsyncFunction
+            val downloadRequest = DownloadRequest.Builder(track.id, track.url.toUri())
+                .setData(gson.toJson(track).toByteArray())
+                .build()
 
-            val mediaItem = track.toMediaItem(gson)
-            val targetIndex = player.currentMediaItemIndex + 1
+            DownloadService.sendAddDownload(
+                context,
+                OrpheusDownloadService::class.java,
+                downloadRequest,
+                false
+            )
+        }
 
-            var existingIndex = -1
-            for (i in 0 until player.mediaItemCount) {
-                if (player.getMediaItemAt(i).mediaId == track.id) {
-                    existingIndex = i
-                    break
+        AsyncFunction("multiDownload") { tracks: List<TrackRecord> ->
+            val context = appContext.reactContext ?: return@AsyncFunction
+            tracks.forEach { track ->
+                val downloadRequest = DownloadRequest.Builder(track.id, track.url.toUri())
+                    .setData(gson.toJson(track).toByteArray())
+                    .build()
+                DownloadService.sendAddDownload(
+                    context,
+                    OrpheusDownloadService::class.java,
+                    downloadRequest,
+                    false
+                )
+            }
+            return@AsyncFunction
+        }
+
+        AsyncFunction("removeDownload") { id: String ->
+            val context = appContext.reactContext ?: return@AsyncFunction
+            DownloadService.sendRemoveDownload(
+                context,
+                OrpheusDownloadService::class.java,
+                id,
+                false
+            )
+        }
+
+        AsyncFunction("removeAllDownloads") {
+            val context = appContext.reactContext ?: return@AsyncFunction null
+            DownloadService.sendRemoveAllDownloads(
+                context,
+                OrpheusDownloadService::class.java,
+                false
+            )
+        }
+
+        AsyncFunction("getDownloads") {
+            val context =
+                appContext.reactContext ?: return@AsyncFunction emptyList<Map<String, Any>>()
+            val downloadManager = DownloadUtil.getDownloadManager(context)
+            val downloadIndex = downloadManager.downloadIndex
+
+            val cursor = downloadIndex.getDownloads()
+            val result = ArrayList<Map<String, Any>>()
+
+            try {
+                while (cursor.moveToNext()) {
+                    val download = cursor.download
+                    result.add(getDownloadMap(download))
+                }
+            } finally {
+                cursor.close()
+            }
+            return@AsyncFunction result
+        }
+
+        AsyncFunction("getDownloadStatusByIds") { ids: List<String> ->
+            val context =
+                appContext.reactContext ?: return@AsyncFunction emptyMap<String, Int>()
+            val downloadManager = DownloadUtil.getDownloadManager(context)
+            val downloadIndex = downloadManager.downloadIndex
+
+            val result = mutableMapOf<String, Int>()
+
+            for (id in ids) {
+                val download = downloadIndex.getDownload(id)
+                if (download != null) {
+                    result[id] = download.state
                 }
             }
+            return@AsyncFunction result
+        }
+    }
 
-            if (existingIndex != -1) {
-                if (existingIndex == player.currentMediaItemIndex) {
-                    return@AsyncFunction
+    private fun getDownloadMap(download: Download): Map<String, Any> {
+        val trackJson = if (download.request.data.isNotEmpty()) {
+            String(download.request.data)
+        } else null
+
+        val map = mutableMapOf<String, Any>(
+            "id" to download.request.id,
+            "state" to download.state,
+            "percentDownloaded" to download.percentDownloaded,
+            "bytesDownloaded" to download.bytesDownloaded,
+            "contentLength" to download.contentLength
+        )
+
+        if (trackJson != null) {
+            try {
+                val track = gson.fromJson(trackJson, TrackRecord::class.java)
+                map["track"] = track
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+        return map
+    }
+
+    private val downloadListener = object : DownloadManager.Listener {
+        override fun onDownloadChanged(
+            downloadManager: DownloadManager,
+            download: Download,
+            finalException: Exception?
+        ) {
+            sendEvent("onDownloadUpdated", getDownloadMap(download))
+            updateDownloadProgressRunnerState()
+        }
+    }
+
+    private val downloadProgressRunnable = object : Runnable {
+        override fun run() {
+            val manager = downloadManager ?: return
+            if (manager.currentDownloads.isNotEmpty()) {
+                for (download in manager.currentDownloads) {
+                    if (download.state == Download.STATE_DOWNLOADING) {
+                        sendEvent("onDownloadUpdated", getDownloadMap(download))
+                    }
                 }
-                val safeTargetIndex = targetIndex.coerceAtMost(player.mediaItemCount)
-
-                player.moveMediaItem(existingIndex, safeTargetIndex)
-
-            } else {
-                val safeTargetIndex = targetIndex.coerceAtMost(player.mediaItemCount)
-
-                player.addMediaItem(safeTargetIndex, mediaItem)
+                mainHandler.postDelayed(this, 500)
             }
+        }
+    }
 
-            if (player.playbackState == Player.STATE_IDLE) {
-                player.prepare()
-            }
-        }.runOnQueue(Queues.MAIN)
+    private fun updateDownloadProgressRunnerState() {
+        mainHandler.removeCallbacks(downloadProgressRunnable)
+        val manager = downloadManager ?: return
+
+        val hasActiveDownloads =
+            manager.currentDownloads.any { it.state == Download.STATE_DOWNLOADING }
+
+        if (hasActiveDownloads) {
+            mainHandler.post(downloadProgressRunnable)
+        }
     }
 
     private fun setupListeners() {

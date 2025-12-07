@@ -48,6 +48,7 @@ export type OrpheusEvents = {
     buffered: number;
   }): void;
   onIsPlayingChanged(event: { status: boolean }): void;
+  onDownloadUpdated(event: DownloadTask): void;
 };
 
 declare class OrpheusModule extends NativeModule<OrpheusEvents> {
@@ -157,6 +158,55 @@ declare class OrpheusModule extends NativeModule<OrpheusEvents> {
   getSleepTimerEndTime(): Promise<number | null>;
 
   cancelSleepTimer(): Promise<void>;
+
+  /**
+   * 下载单首歌曲
+   */
+  downloadTrack(track: Track): Promise<void>;
+
+  /**
+   * 移除下载任务
+   */
+  removeDownload(id: string): Promise<void>;
+
+  /**
+   * 批量下载歌曲
+   */
+  multiDownload(tracks: Track[]): Promise<void>;
+
+  /**
+   * 移除所有下载任务
+   */
+  removeAllDownloads(): Promise<void>;
+
+  /**
+   * 获取所有下载任务
+   */
+  getDownloads(): Promise<DownloadTask[]>;
+
+  /**
+   * 批量返回指定 ID 的下载状态
+   */
+  getDownloadStatusByIds(ids: string[]): Promise<Record<string, DownloadState>>;
+}
+
+export enum DownloadState {
+  QUEUED = 0,
+  STOPPED = 1,
+  DOWNLOADING = 2,
+  COMPLETED = 3,
+  FAILED = 4,
+  REMOVING = 5,
+  RESTARTING = 7,
+}
+
+export interface DownloadTask {
+  id: string;
+  state: DownloadState;
+  percentDownloaded: number;
+  bytesDownloaded: number;
+  contentLength: number;
+  track?: Track;
 }
 
 export const Orpheus = requireNativeModule<OrpheusModule>("Orpheus");

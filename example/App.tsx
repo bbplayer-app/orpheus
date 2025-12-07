@@ -54,6 +54,7 @@ export default function OrpheusTestScreen() {
   const [shuffleMode, setShuffleMode] = useState(false);
   const {track: currentTrack} = useCurrentTrack()
   const [restorePlaybackPositionEnabled, setRestorePlaybackPositionEnabled] = useState(false);
+  const [downloadTasks, setDownloadTasks] = useState<any[]>([]);
   
   // 调试信息
   const [lastEventLog, setLastEventLog] = useState<string>('Ready');
@@ -106,6 +107,13 @@ export default function OrpheusTestScreen() {
       setLastEventLog(`Error: ${event.code}`);
     });
 
+    // 监听下载进度
+    const subDownload = Orpheus.addListener('onDownloadUpdated', (task) => {
+      console.log(`Download Update [${task.id}]: ${task.percentDownloaded.toFixed(1)}% (State: ${task.state})`);
+      // 简单更新一下日志，或者你可以把 task 存到 state 里展示
+      // setLastEventLog(`DL [${task.id}]: ${task.percentDownloaded.toFixed(1)}%`);
+    });
+
     return () => {
       subState.remove();
       // subTrackStart.remove();
@@ -113,6 +121,7 @@ export default function OrpheusTestScreen() {
       subPlaying.remove();
       subProgress.remove();
       subError.remove();
+      subDownload.remove();
     };
   }, []);
 
@@ -359,6 +368,30 @@ export default function OrpheusTestScreen() {
             <Button title="Cancel Sleep Timer" onPress={() => {
               Orpheus.cancelSleepTimer();
             }} />
+          </View>
+
+          <Text style={[styles.sectionTitle, { marginTop: 15 }]}>Download API</Text>
+          <View style={styles.grid}>
+             <Button title="Download [0]" onPress={() => {
+               Orpheus.downloadTrack(TEST_TRACKS[0]);
+             }} />
+             <Button title="Multi Download" onPress={() => {
+                Orpheus.multiDownload(TEST_TRACKS.slice(1));
+             }} />
+             <Button title="Get All Downloads" onPress={async () => {
+               const downloads = await Orpheus.getDownloads();
+               console.log('All Downloads:', downloads);
+               setLastEventLog(`Downloads count: ${downloads.length}`);
+             }} />
+             <Button title="Get IDs Status" onPress={async () => {
+               const ids = TEST_TRACKS.map(t => t.id);
+               const statusMap = await Orpheus.getDownloadsByIds(ids);
+               console.log('Status Map:', statusMap);
+               Alert.alert('Status Map', JSON.stringify(statusMap, null, 2));
+             }} />
+             <Button title="Remove All DL" onPress={() => {
+               Orpheus.removeAllDownloads();
+             }} danger />
           </View>
         </View>
 

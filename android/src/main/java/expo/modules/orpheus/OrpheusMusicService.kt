@@ -1,5 +1,7 @@
 package expo.modules.orpheus
 
+import android.app.PendingIntent
+import android.content.Intent
 import android.os.Bundle
 import androidx.annotation.OptIn
 import androidx.core.net.toUri
@@ -9,10 +11,6 @@ import androidx.media3.common.Player
 import androidx.media3.common.Timeline
 import androidx.media3.common.util.Log
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.datasource.DataSpec
-import androidx.media3.datasource.DefaultHttpDataSource
-import androidx.media3.datasource.ResolvingDataSource
-import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.MediaLibraryService
@@ -21,12 +19,11 @@ import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionResult
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
-import expo.modules.orpheus.bilibili.BilibiliRepository
+import expo.modules.orpheus.utils.DownloadUtil
 import expo.modules.orpheus.utils.MediaItemStorer
 import expo.modules.orpheus.utils.SleepTimeController
-import java.io.IOException
 
-class OrpheusService : MediaLibraryService() {
+class OrpheusMusicService : MediaLibraryService() {
 
     private var player: ExoPlayer? = null
     private var mediaSession: MediaLibrarySession? = null
@@ -39,64 +36,11 @@ class OrpheusService : MediaLibraryService() {
         MediaItemStorer.initialize(this)
 
 
-        val httpDataSourceFactory = DefaultHttpDataSource.Factory()
-            .setUserAgent("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36")
-            .setAllowCrossProtocolRedirects(true)
-
-        val cacheDataSourceFactory = CacheDataSource.Factory()
-            .setCache(DownloadCache.get(this))
-            .setUpstreamDataSourceFactory(httpDataSourceFactory)
-            .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
-
-        val resolvingDataSourceFactory = ResolvingDataSource.Factory(
-            cacheDataSourceFactory,
-            object : ResolvingDataSource.Resolver {
-                // TODO: maybe we need to add a cache?
-                override fun resolveDataSpec(dataSpec: DataSpec): DataSpec {
-                    val uri = dataSpec.uri
-
-                    // orpheus://bilibili?bvid=bv123124&cid=114514&quality=30280&dolby=0&hires=0
-                    if (uri.scheme == "orpheus" && uri.host == "bilibili") {
-                        try {
-                            val bvid = uri.getQueryParameter("bvid")
-                            val cid = uri.getQueryParameter("cid")?.toLongOrNull()
-                            val quality = uri.getQueryParameter("quality")?.toIntOrNull() ?: 30280
-                            val enableDolby = uri.getQueryParameter("dolby") == "1"
-                            val enableHiRes = uri.getQueryParameter("hires") == "1"
-
-                            if (bvid == null) {
-                                throw IOException("Invalid Bilibili Params: bvid=$bvid, cid=$cid")
-                            }
-
-                            val realUrl = BilibiliRepository.resolveAudioUrl(
-                                bvid = bvid,
-                                cid = cid,
-                                audioQuality = quality,
-                                enableDolby = enableDolby,
-                                enableHiRes = enableHiRes,
-                                cookie = OrpheusConfig.bilibiliCookie
-                            )
-
-                            val headers = HashMap<String, String>()
-                            headers["Referer"] = "https://www.bilibili.com/"
-
-                            return dataSpec.buildUpon()
-                                .setUri(realUrl.toUri())
-                                .setHttpRequestHeaders(headers)
-                                .setKey(uri.toString())
-                                .build()
-                        } catch (e: Exception) {
-                            throw IOException("Resolve Url Failed: ${e.message}", e)
-                        }
-                    }
-
-                    return dataSpec
-                }
-            }
-        )
+        val dataSourceFactory = DownloadUtil.getPlayerDataSourceFactory(this)
 
         val mediaSourceFactory = DefaultMediaSourceFactory(this)
-            .setDataSourceFactory(resolvingDataSourceFactory)
+            .setDataSourceFactory(dataSourceFactory)
+
 
         player = ExoPlayer.Builder(this)
             .setMediaSourceFactory(mediaSourceFactory)
@@ -111,8 +55,32 @@ class OrpheusService : MediaLibraryService() {
 
         setupListeners()
 
+        var launchIntent = packageManager.getLaunchIntentForPackage(packageName)
+
+        if (launchIntent == null) {
+            launchIntent = Intent().apply {
+                setClassName(packageName, "$packageName.MainActivity")
+            }
+        }
+
+        launchIntent.apply {
+            action = Intent.ACTION_VIEW
+            data = "orpheus://player".toUri()
+            addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        }
+
+        val contentIntent = launchIntent.let {
+            PendingIntent.getActivity(
+                this,
+                0,
+                it,
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            )
+        }
+
         mediaSession = MediaLibrarySession.Builder(this, player!!, callback)
             .setId("OrpheusSession")
+            .setSessionActivity(contentIntent)
             .build()
 
         restorePlayerState(MediaItemStorer.isRestoreEnabled())

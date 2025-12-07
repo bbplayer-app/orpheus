@@ -499,7 +499,12 @@ class ExpoOrpheusModule : Module() {
                 newPosition: Player.PositionInfo,
                 reason: Int
             ) {
-                if (oldPosition.mediaItemIndex != newPosition.mediaItemIndex) {
+                val isIndexChanged = oldPosition.mediaItemIndex != newPosition.mediaItemIndex
+
+                val isSingleLoop = (oldPosition.mediaItemIndex == newPosition.mediaItemIndex) &&
+                        (reason == Player.DISCONTINUITY_REASON_AUTO_TRANSITION)
+
+                if (isIndexChanged || isSingleLoop) {
                     val lastMediaItem =
                         controller?.getMediaItemAt(oldPosition.mediaItemIndex) ?: return
 

@@ -9,6 +9,7 @@ import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.Timeline
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionResult
@@ -34,7 +35,7 @@ class ExpoOrpheusModule : Module() {
     // 记录上一首歌曲的 ID，用于在切歌时发送给 JS
     private var lastMediaId: String? = null
 
-    private var currentTrackDuration: Long = 0L
+    private val durationCache = mutableMapOf<String, Long>()
 
     val gson = Gson()
 
@@ -346,8 +347,19 @@ class ExpoOrpheusModule : Module() {
                 )
 
                 lastMediaId = newId
-                currentTrackDuration = 0L
                 saveCurrentPosition()
+            }
+
+            override fun onTimelineChanged(timeline: Timeline, reason: Int) {
+                val player = controller ?: return
+                val currentItem = player.currentMediaItem ?: return
+                val mediaId = currentItem.mediaId
+
+                val duration = player.duration
+
+                if (duration != C.TIME_UNSET && duration > 0) {
+                    durationCache[mediaId] = duration
+                }
             }
 
             override fun onPositionDiscontinuity(
@@ -355,16 +367,18 @@ class ExpoOrpheusModule : Module() {
                 newPosition: Player.PositionInfo,
                 reason: Int
             ) {
-                Player.DISCONTINUITY_REASON_SEEK_ADJUSTMENT
                 if (oldPosition.mediaItemIndex != newPosition.mediaItemIndex) {
                     val lastMediaItem =
                         controller?.getMediaItemAt(oldPosition.mediaItemIndex) ?: return
+
+                    // onPositionDiscontinuity 会被连续调用两次，且两次调用参数相同，很奇怪的行为，所以采用这种方式过滤.没值就直接返回，不发事件。
+                    val duration = durationCache.remove(lastMediaItem.mediaId) ?: return
 
                     sendEvent(
                         "onTrackFinished", mapOf(
                             "trackId" to lastMediaItem.mediaId,
                             "finalPosition" to oldPosition.positionMs / 1000.0,
-                            "duration" to currentTrackDuration / 1000.0,
+                            "duration" to duration / 1000.0,
                         )
                     )
                 }
@@ -380,11 +394,6 @@ class ExpoOrpheusModule : Module() {
                         "state" to state
                     )
                 )
-
-                if (state == Player.STATE_READY) {
-                    val d = controller?.duration
-                    if (d != C.TIME_UNSET && d != null) currentTrackDuration = d
-                }
 
                 updateProgressRunnerState()
             }

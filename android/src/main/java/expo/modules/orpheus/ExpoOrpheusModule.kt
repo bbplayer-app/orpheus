@@ -314,7 +314,7 @@ class ExpoOrpheusModule : Module() {
             if (player.playbackState == Player.STATE_IDLE) {
                 player.prepare()
             }
-        }
+        }.runOnQueue(Queues.MAIN)
 
         AsyncFunction("downloadTrack") { track: TrackRecord ->
             val context = appContext.reactContext ?: return@AsyncFunction
@@ -398,6 +398,51 @@ class ExpoOrpheusModule : Module() {
                 if (download != null) {
                     result[id] = download.state
                 }
+            }
+            return@AsyncFunction result
+        }
+
+        AsyncFunction("clearUncompletedDownloadTasks") {
+            val context = appContext.reactContext ?: return@AsyncFunction null
+            val downloadManager = DownloadUtil.getDownloadManager(context)
+            val downloadIndex = downloadManager.downloadIndex
+
+            val cursor = downloadIndex.getDownloads()
+            try {
+                while (cursor.moveToNext()) {
+                    val download = cursor.download
+                    if (download.state != Download.STATE_COMPLETED) {
+                        DownloadService.sendRemoveDownload(
+                            context,
+                            OrpheusDownloadService::class.java,
+                            download.request.id,
+                            false
+                        )
+                    }
+                }
+            } finally {
+                cursor.close()
+            }
+        }
+
+        AsyncFunction("getUncompletedDownloadTasks") {
+            val context =
+                appContext.reactContext ?: return@AsyncFunction emptyList<Map<String, Any>>()
+            val downloadManager = DownloadUtil.getDownloadManager(context)
+            val downloadIndex = downloadManager.downloadIndex
+
+            val cursor = downloadIndex.getDownloads()
+            val result = ArrayList<Map<String, Any>>()
+
+            try {
+                while (cursor.moveToNext()) {
+                    val download = cursor.download
+                    if (download.state != Download.STATE_COMPLETED) {
+                        result.add(getDownloadMap(download))
+                    }
+                }
+            } finally {
+                cursor.close()
             }
             return@AsyncFunction result
         }

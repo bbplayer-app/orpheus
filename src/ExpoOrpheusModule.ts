@@ -175,7 +175,7 @@ declare class OrpheusModule extends NativeModule<OrpheusEvents> {
   multiDownload(tracks: Track[]): Promise<void>;
 
   /**
-   * 移除所有下载任务
+   * 移除所有下载任务(包括已完成的及源文件)
    */
   removeAllDownloads(): Promise<void>;
 
@@ -188,6 +188,16 @@ declare class OrpheusModule extends NativeModule<OrpheusEvents> {
    * 批量返回指定 ID 的下载状态
    */
   getDownloadStatusByIds(ids: string[]): Promise<Record<string, DownloadState>>;
+
+  /**
+   * 清除未完成的下载任务
+   */
+  clearUncompletedDownloadTasks(): Promise<void>;
+
+  /**
+   * 获取所有未完成的下载任务
+   */
+  getUncompletedDownloadTasks(): Promise<DownloadTask[]>;
 }
 
 export enum DownloadState {

@@ -16,6 +16,13 @@ import expo.modules.orpheus.DownloadCache
 import expo.modules.orpheus.OrpheusConfig
 import expo.modules.orpheus.OrpheusDownloadService
 import expo.modules.orpheus.bilibili.BilibiliRepository
+import expo.modules.orpheus.bilibili.VolumeData
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.launch
 import java.io.IOException
 import java.util.concurrent.Executors
 
@@ -27,6 +34,15 @@ object DownloadUtil {
     private var downloadDataSourceFactory: DataSource.Factory? = null
 
     private var downloadNotificationHelper: DownloadNotificationHelper? = null
+
+    var itemVolumeMap: MutableMap<String, VolumeData> = mutableMapOf()
+
+    private val _volumeResolvedEvent = MutableSharedFlow<Pair<String, VolumeData>>(
+        replay = 0,
+        extraBufferCapacity = 1,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST
+    )
+    val volumeResolvedEvent = _volumeResolvedEvent.asSharedFlow()
 
     @Synchronized
     fun getDownloadManager(context: Context): DownloadManager {
@@ -51,17 +67,11 @@ object DownloadUtil {
         if (playerDataSourceFactory == null) {
             val upstreamFactory = getUpstreamFactory()
 
-            val lruCache = DownloadCache.getLruCache(context)
             val downloadCache = DownloadCache.getStableCache(context)
-
-            val lruFactory = CacheDataSource.Factory()
-                .setCache(lruCache)
-                .setUpstreamDataSourceFactory(upstreamFactory)
-                .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
 
             val downloadFactory = CacheDataSource.Factory()
                 .setCache(downloadCache)
-                .setUpstreamDataSourceFactory(lruFactory)
+                .setUpstreamDataSourceFactory(upstreamFactory)
                 .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
                 .setCacheWriteDataSinkFactory(null)
 
@@ -99,7 +109,12 @@ object DownloadUtil {
         return downloadNotificationHelper!!
     }
 
-    private class BilibiliResolver : ResolvingDataSource.Resolver {
+    suspend fun emitVolumeEvent(uri: String, data: VolumeData) {
+        _volumeResolvedEvent.emit(uri to data)
+    }
+
+    private class BilibiliResolver :
+        ResolvingDataSource.Resolver {
         override fun resolveDataSpec(dataSpec: DataSpec): DataSpec {
             val uri = dataSpec.uri
             if (uri.scheme == "orpheus" && uri.host == "bilibili") {
@@ -107,7 +122,7 @@ object DownloadUtil {
                     val bvid = uri.getQueryParameter("bvid")
                     val cid = uri.getQueryParameter("cid")?.toLongOrNull()
                     val quality = uri.getQueryParameter("quality")?.toIntOrNull() ?: 30280
-                    val realUrl = BilibiliRepository.resolveAudioUrl(
+                    val (realUrl, volume) = BilibiliRepository.resolveAudioUrl(
                         bvid = bvid!!,
                         cid = cid,
                         audioQuality = quality,
@@ -115,6 +130,13 @@ object DownloadUtil {
                         enableHiRes = uri.getQueryParameter("hires") == "1",
                         cookie = OrpheusConfig.bilibiliCookie
                     )
+                    // 在这里保存响度均衡数据，并且直接发一个事件，在 OrpheusMusicService 监听
+                    if (volume !== null) {
+                        itemVolumeMap[dataSpec.uri.toString()] = volume
+                        CoroutineScope(Dispatchers.IO).launch {
+                            emitVolumeEvent(dataSpec.uri.toString(), volume)
+                        }
+                    }
 
                     val headers = HashMap<String, String>()
                     headers["Referer"] = "https://www.bilibili.com/"

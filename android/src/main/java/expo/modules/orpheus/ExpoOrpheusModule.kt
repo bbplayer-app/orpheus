@@ -30,7 +30,7 @@ import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import expo.modules.orpheus.models.TrackRecord
 import expo.modules.orpheus.utils.DownloadUtil
-import expo.modules.orpheus.utils.MediaItemStorer
+import expo.modules.orpheus.utils.Storage
 import expo.modules.orpheus.utils.toMediaItem
 
 @UnstableApi
@@ -67,7 +67,7 @@ class ExpoOrpheusModule : Module() {
 
         OnCreate {
             val context = appContext.reactContext ?: return@OnCreate
-            MediaItemStorer.initialize(context)
+            Storage.initialize(context)
             val sessionToken = SessionToken(
                 context,
                 ComponentName(context, OrpheusMusicService::class.java)
@@ -97,16 +97,23 @@ class ExpoOrpheusModule : Module() {
         }
 
         Constant("restorePlaybackPositionEnabled") {
-            MediaItemStorer.isRestoreEnabled()
+            Storage.isRestoreEnabled()
+        }
+
+        Constant("loudnessNormalizationEnabled") {
+            Storage.isLoudnessNormalizationEnabled()
         }
 
         Function("setBilibiliCookie") { cookie: String ->
             OrpheusConfig.bilibiliCookie = cookie
         }
 
+        Function("setLoudnessNormalizationEnabled") { enabled: Boolean ->
+            Storage.setLoudnessNormalizationEnabled(enabled)
+        }
 
         Function("setRestorePlaybackPositionEnabled") { enabled: Boolean ->
-            MediaItemStorer.setRestoreEnabled(enabled)
+            Storage.setRestoreEnabled(enabled)
         }
 
         AsyncFunction("getPosition") {
@@ -175,6 +182,7 @@ class ExpoOrpheusModule : Module() {
             checkController()
             controller?.clearMediaItems()
             durationCache.clear()
+            DownloadUtil.itemVolumeMap.clear()
         }.runOnQueue(Queues.MAIN)
 
         AsyncFunction("skipTo") { index: Int ->
@@ -229,7 +237,7 @@ class ExpoOrpheusModule : Module() {
             if (index >= 0 && index < (controller?.mediaItemCount ?: 0)) {
                 controller?.removeMediaItem(index)
             }
-        }
+        }.runOnQueue(Queues.MAIN)
 
         AsyncFunction("getQueue") {
             checkController()
@@ -293,6 +301,7 @@ class ExpoOrpheusModule : Module() {
             if (clearQueue == true) {
                 player.clearMediaItems()
                 durationCache.clear()
+                DownloadUtil.itemVolumeMap.clear()
             }
             val initialSize = player.mediaItemCount
             player.addMediaItems(mediaItems)
@@ -309,6 +318,40 @@ class ExpoOrpheusModule : Module() {
 
                     return@AsyncFunction
                 }
+            }
+
+            if (player.playbackState == Player.STATE_IDLE) {
+                player.prepare()
+            }
+        }.runOnQueue(Queues.MAIN)
+
+        AsyncFunction("playNext") { track: TrackRecord ->
+            checkController()
+            val player = controller ?: return@AsyncFunction
+
+            val mediaItem = track.toMediaItem(gson)
+            val targetIndex = player.currentMediaItemIndex + 1
+
+            var existingIndex = -1
+            for (i in 0 until player.mediaItemCount) {
+                if (player.getMediaItemAt(i).mediaId == track.id) {
+                    existingIndex = i
+                    break
+                }
+            }
+
+            if (existingIndex != -1) {
+                if (existingIndex == player.currentMediaItemIndex) {
+                    return@AsyncFunction
+                }
+                val safeTargetIndex = targetIndex.coerceAtMost(player.mediaItemCount)
+
+                player.moveMediaItem(existingIndex, safeTargetIndex)
+
+            } else {
+                val safeTargetIndex = targetIndex.coerceAtMost(player.mediaItemCount)
+
+                player.addMediaItem(safeTargetIndex, mediaItem)
             }
 
             if (player.playbackState == Player.STATE_IDLE) {
@@ -616,6 +659,16 @@ class ExpoOrpheusModule : Module() {
                     )
                 )
             }
+
+            override fun onRepeatModeChanged(repeatMode: Int) {
+                super.onRepeatModeChanged(repeatMode)
+                Storage.saveRepeatMode(repeatMode)
+            }
+
+            override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
+                super.onShuffleModeEnabledChanged(shuffleModeEnabled)
+                Storage.saveShuffleMode(shuffleModeEnabled)
+            }
         })
     }
 
@@ -686,7 +739,7 @@ class ExpoOrpheusModule : Module() {
     private fun saveCurrentPosition() {
         val player = controller ?: return
         if (player.playbackState != Player.STATE_IDLE) {
-            MediaItemStorer.savePosition(
+            Storage.savePosition(
                 player.currentMediaItemIndex,
                 player.currentPosition
             )

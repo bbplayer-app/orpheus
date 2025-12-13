@@ -13,11 +13,6 @@ fun TrackRecord.toMediaItem(gson: Gson): MediaItem {
     val extras = Bundle()
     extras.putString("track_json", trackJson)
 
-    this.loudness?.let {
-        extras.putDouble("loudness_measured_i", it.measured_i)
-        extras.putDouble("loudness_target_i", it.target_i)
-    }
-
     val artUri = if (!this.artwork.isNullOrEmpty()) this.artwork?.toUri() else null
 
     val metadata = MediaMetadata.Builder()

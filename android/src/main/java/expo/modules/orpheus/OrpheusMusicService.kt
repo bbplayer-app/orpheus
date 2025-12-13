@@ -19,21 +19,31 @@ import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionResult
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
+import expo.modules.orpheus.bilibili.VolumeData
 import expo.modules.orpheus.utils.DownloadUtil
-import expo.modules.orpheus.utils.MediaItemStorer
 import expo.modules.orpheus.utils.SleepTimeController
+import expo.modules.orpheus.utils.Storage
+import expo.modules.orpheus.utils.calculateLoudnessGain
+import expo.modules.orpheus.utils.fadeInTo
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.MainScope
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import kotlin.math.abs
 
 class OrpheusMusicService : MediaLibraryService() {
 
     private var player: ExoPlayer? = null
     private var mediaSession: MediaLibrarySession? = null
     private var sleepTimerManager: SleepTimeController? = null
+    private var volumeFadeJob: Job? = null
+    private var scope = MainScope()
 
     @OptIn(UnstableApi::class)
     override fun onCreate() {
         super.onCreate()
 
-        MediaItemStorer.initialize(this)
+        Storage.initialize(this)
 
 
         val dataSourceFactory = DownloadUtil.getPlayerDataSourceFactory(this)
@@ -83,8 +93,18 @@ class OrpheusMusicService : MediaLibraryService() {
             .setSessionActivity(contentIntent)
             .build()
 
-        restorePlayerState(MediaItemStorer.isRestoreEnabled())
+        restorePlayerState(Storage.isRestoreEnabled())
         sleepTimerManager = SleepTimeController(player!!)
+
+        // 当有新的响度数据时，如果是当前这首歌的就直接应用，否则是预加载，等待 onMediaItemTransition 处理
+        scope.launch {
+            DownloadUtil.volumeResolvedEvent.collect { (uri, volumeData) ->
+                val currentUri = player?.currentMediaItem?.localConfiguration?.uri?.toString()
+                if (currentUri == uri) {
+                    applyVolumeForCurrentItem(volumeData)
+                }
+            }
+        }
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? {
@@ -92,6 +112,8 @@ class OrpheusMusicService : MediaLibraryService() {
     }
 
     override fun onDestroy() {
+        scope.cancel()
+
         mediaSession?.run {
             player.release()
             release()
@@ -187,19 +209,24 @@ class OrpheusMusicService : MediaLibraryService() {
     private fun restorePlayerState(restorePosition: Boolean) {
         val player = player ?: return
 
-        val restoredItems = MediaItemStorer.restoreQueue()
+        val restoredItems = Storage.restoreQueue()
 
         if (restoredItems.isNotEmpty()) {
             player.setMediaItems(restoredItems)
 
-            val savedIndex = MediaItemStorer.getSavedIndex()
-            val savedPosition = MediaItemStorer.getSavedPosition()
+            val savedIndex = Storage.getSavedIndex()
+            val savedPosition = Storage.getSavedPosition()
+            val savedShuffleMode = Storage.getShuffleMode()
+            val savedRepeatMode = Storage.getRepeatMode()
 
             if (savedIndex >= 0 && savedIndex < restoredItems.size) {
                 player.seekTo(savedIndex, if (restorePosition) savedPosition else C.TIME_UNSET)
             } else {
                 player.seekTo(0, 0L)
             }
+
+            player.shuffleModeEnabled = savedShuffleMode
+            player.repeatMode = savedRepeatMode
 
             player.playWhenReady = false
             player.prepare()
@@ -208,11 +235,19 @@ class OrpheusMusicService : MediaLibraryService() {
 
     private fun setupListeners() {
         player?.addListener(object : Player.Listener {
+
+            @OptIn(UnstableApi::class)
             override fun onMediaItemTransition(
                 mediaItem: androidx.media3.common.MediaItem?,
                 reason: Int
             ) {
                 saveCurrentQueue()
+                val uri = mediaItem?.localConfiguration?.uri?.toString() ?: return
+
+                val volumeData = DownloadUtil.itemVolumeMap[uri]
+                if (volumeData != null) {
+                    applyVolumeForCurrentItem(volumeData)
+                }
             }
 
             override fun onTimelineChanged(timeline: Timeline, reason: Int) {
@@ -225,7 +260,30 @@ class OrpheusMusicService : MediaLibraryService() {
         val player = player ?: return
         val queue = List(player.mediaItemCount) { i -> player.getMediaItemAt(i) }
         if (queue.isNotEmpty()) {
-            MediaItemStorer.saveQueue(queue)
+            Storage.saveQueue(queue)
         }
+    }
+
+    @OptIn(UnstableApi::class)
+    private fun applyVolumeForCurrentItem(volumeData: VolumeData) {
+        val player = player ?: return
+        volumeFadeJob?.cancel()
+        val isLoudnessNormalizationEnabled = Storage.isLoudnessNormalizationEnabled()
+        if (!isLoudnessNormalizationEnabled) return
+        val gain = run {
+            val measured = volumeData.measuredI
+            val target = volumeData.targetI
+
+            if (measured == 0.0) 1.0f else calculateLoudnessGain(measured, target)
+        }
+
+        val targetVol = 1.0f * gain
+        val currentVolume = player.volume
+
+        if (abs(currentVolume - targetVol) < 0.001f) {
+            return
+        }
+
+        volumeFadeJob = player.fadeInTo(targetVol, 600L, scope)
     }
 }

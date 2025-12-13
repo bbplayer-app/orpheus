@@ -11,13 +11,17 @@ import com.tencent.mmkv.MMKV
 import expo.modules.orpheus.models.TrackRecord
 
 @OptIn(UnstableApi::class)
-object MediaItemStorer {
+object Storage {
     private var kv: MMKV? = null
     private val gson = Gson()
     private const val KEY_RESTORE_POSITION_ENABLED = "config_restore_position_enabled"
+
+    private const val KEY_LOUDNESS_NORMALIZATION_ENABLED = "config_loudness_normalization_enabled"
     private const val KEY_SAVED_QUEUE = "saved_queue_json_list"
     private const val KEY_SAVED_INDEX = "saved_index"
     private const val KEY_SAVED_POSITION = "saved_position"
+    private const val KEY_SAVED_REPEAT_MODE = "saved_repeat_mode"
+    private const val KEY_SAVED_SHUFFLE_MODE = "saved_shuffle_mode"
 
 
     @Synchronized
@@ -39,8 +43,20 @@ object MediaItemStorer {
         }
     }
 
+    fun setLoudnessNormalizationEnabled(enabled: Boolean) {
+        try {
+            safeKv.encode(KEY_LOUDNESS_NORMALIZATION_ENABLED, enabled)
+        } catch (e: Exception) {
+            Log.e("MediaItemStorer", "Failed to set loudness normalization enabled", e)
+        }
+    }
+
     fun isRestoreEnabled(): Boolean {
         return safeKv.decodeBool(KEY_RESTORE_POSITION_ENABLED, false)
+    }
+
+    fun isLoudnessNormalizationEnabled(): Boolean {
+        return safeKv.decodeBool(KEY_LOUDNESS_NORMALIZATION_ENABLED, true)
     }
 
     @OptIn(UnstableApi::class)
@@ -89,6 +105,11 @@ object MediaItemStorer {
         safeKv.encode(KEY_SAVED_POSITION, position)
     }
 
+    fun saveRepeatMode(repeatMode: Int) = safeKv.encode(KEY_SAVED_REPEAT_MODE, repeatMode)
+    fun saveShuffleMode(shuffleMode: Boolean) = safeKv.encode(KEY_SAVED_SHUFFLE_MODE, shuffleMode)
+
     fun getSavedIndex() = kv?.decodeInt(KEY_SAVED_INDEX, 0) ?: 0
     fun getSavedPosition() = kv?.decodeLong(KEY_SAVED_POSITION, 0L) ?: 0L
+    fun getRepeatMode() = kv?.decodeInt(KEY_SAVED_REPEAT_MODE, 0) ?: 0
+    fun getShuffleMode() = kv?.decodeBool(KEY_SAVED_SHUFFLE_MODE, false) ?: false
 }

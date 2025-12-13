@@ -54,6 +54,7 @@ export type OrpheusEvents = {
 declare class OrpheusModule extends NativeModule<OrpheusEvents> {
   
   restorePlaybackPositionEnabled: boolean;
+  loudnessNormalizationEnabled: boolean;
 
   /**
    * 获取当前进度（秒）
@@ -100,6 +101,7 @@ declare class OrpheusModule extends NativeModule<OrpheusEvents> {
   setBilibiliCookie(cookie: string): void;
   
   setRestorePlaybackPositionEnabled(enabled: boolean): void;
+  setLoudnessNormalizationEnabled(enabled: boolean): void;
 
   play(): Promise<void>;
 

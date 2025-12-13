@@ -58,7 +58,7 @@ object BilibiliRepository {
         enableDolby: Boolean,
         enableHiRes: Boolean,
         cookie: String?
-    ): String {
+    ): Pair<String, VolumeData?> {
         var cidInternal = cid
         val (imgKey, subKey) = getWbiKeys()
         if (cidInternal === null) {
@@ -94,22 +94,23 @@ object BilibiliRepository {
         val data = apiResponse.data
         val dash = data.dash
         val durl = data.durl
+        val volume = data.volume
 
         if (dash == null) {
             if (durl.isNullOrEmpty()) {
                 throw IOException("AudioStreamError: 请求到的流数据不包含 dash 或 durl 任一字段")
             }
-            return durl[0].url
+            return durl[0].url to volume
         }
 
         if (enableDolby && dash.dolby?.audio?.isNotEmpty() == true) {
             Log.d(TAG, "select dolby source")
-            return dash.dolby.audio[0].baseUrl
+            return dash.dolby.audio[0].baseUrl to volume
         }
 
         if (enableHiRes && dash.flac?.audio != null) {
             Log.d(TAG, "select hires source")
-            return dash.flac.audio.baseUrl
+            return dash.flac.audio.baseUrl to volume
         }
 
         if (dash.audio.isNullOrEmpty()) {
@@ -119,10 +120,10 @@ object BilibiliRepository {
         val targetAudio = dash.audio.find { it.id == audioQuality }
 
         if (targetAudio != null) {
-            return targetAudio.baseUrl
+            return targetAudio.baseUrl to volume
         } else {
             val highestQualityAudio = dash.audio[0]
-            return highestQualityAudio.baseUrl
+            return highestQualityAudio.baseUrl to volume
         }
     }
 

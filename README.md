@@ -15,11 +15,15 @@ Orpheus 通过特殊的 uri 识别来自 bilibili 的资源，格式为 `orpheus
 Orpheus 内部有两层缓存：
 
 1. 用户手动下载的缓存
-2. 边下边播：LRU 缓存，256mb
+~~ 2. 边下边播：LRU 缓存，256mb ~~ (移除了这一层缓存，方便响度均衡实现)
 
 ## 下载系统
 
 Orpheus 集成了 Media3 的 DownloadManager，抛弃了原先 BBPlayer 中繁琐的下载实现。
+
+## 响度均衡
+
+默认启用，只对未缓存的 b 站音频生效
 
 ## 使用
 

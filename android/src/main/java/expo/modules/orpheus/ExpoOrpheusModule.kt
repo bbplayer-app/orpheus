@@ -1,7 +1,6 @@
 package expo.modules.orpheus
 
 import android.content.ComponentName
-import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -18,13 +17,9 @@ import androidx.media3.exoplayer.offline.DownloadManager
 import androidx.media3.exoplayer.offline.DownloadRequest
 import androidx.media3.exoplayer.offline.DownloadService
 import androidx.media3.session.MediaController
-import androidx.media3.session.SessionCommand
-import androidx.media3.session.SessionResult
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
-import com.google.common.util.concurrent.MoreExecutors
 import com.google.gson.Gson
-import expo.modules.kotlin.exception.CodedException
 import expo.modules.kotlin.functions.Queues
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
@@ -35,9 +30,10 @@ import expo.modules.orpheus.utils.toMediaItem
 
 @UnstableApi
 class ExpoOrpheusModule : Module() {
+    // keep this controller only to make sure MediaLibraryService is init.
     private var controllerFuture: ListenableFuture<MediaController>? = null
 
-    private var controller: MediaController? = null
+    private var player: Player? = null
 
     private val mainHandler = Handler(Looper.getMainLooper())
 
@@ -50,6 +46,124 @@ class ExpoOrpheusModule : Module() {
     private val durationCache = mutableMapOf<String, Long>()
 
     val gson = Gson()
+
+    private val playerListener = object : Player.Listener {
+
+        /**
+         * 核心：处理切歌、播放结束逻辑
+         */
+        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            val newId = mediaItem?.mediaId ?: ""
+            Log.e("Orpheus", "onMediaItemTransition: $reason")
+
+            sendEvent(
+                "onTrackStarted", mapOf(
+                    "trackId" to newId,
+                    "reason" to reason
+                )
+            )
+
+            lastMediaId = newId
+            saveCurrentPosition()
+        }
+
+        override fun onTimelineChanged(timeline: Timeline, reason: Int) {
+            val p = player ?: return
+            val currentItem = p.currentMediaItem ?: return
+            val mediaId = currentItem.mediaId
+
+            val duration = p.duration
+            Log.d(
+                "Orpheus",
+                "onTimelineChanged: reason: $reason mediaId: $mediaId duration: $duration"
+            )
+
+            if (duration != C.TIME_UNSET && duration > 0) {
+                durationCache[mediaId] = duration
+            }
+        }
+
+        override fun onPositionDiscontinuity(
+            oldPosition: Player.PositionInfo,
+            newPosition: Player.PositionInfo,
+            reason: Int
+        ) {
+            val isAutoTransition = reason == Player.DISCONTINUITY_REASON_AUTO_TRANSITION
+            val isIndexChanged = oldPosition.mediaItemIndex != newPosition.mediaItemIndex
+            val lastMediaItem = oldPosition.mediaItem ?: return
+            val currentTime = System.currentTimeMillis()
+            if ((currentTime - lastTrackFinishedAt) < 200) {
+                return
+            }
+
+            Log.d(
+                "Orpheus",
+                "onPositionDiscontinuity: isAutoTransition:$isAutoTransition isIndexChanged: $isIndexChanged durationCache:$durationCache"
+            )
+
+            if (isAutoTransition || isIndexChanged) {
+
+                val duration = durationCache[lastMediaItem.mediaId] ?: return
+                lastTrackFinishedAt = currentTime
+
+                sendEvent(
+                    "onTrackFinished", mapOf(
+                        "trackId" to lastMediaItem.mediaId,
+                        "finalPosition" to oldPosition.positionMs / 1000.0,
+                        "duration" to duration / 1000.0,
+                    )
+                )
+            }
+        }
+
+        /**
+         * 处理播放状态改变
+         */
+        override fun onPlaybackStateChanged(state: Int) {
+            // state: 1=IDLE, 2=BUFFERING, 3=READY, 4=ENDED
+            sendEvent(
+                "onPlaybackStateChanged", mapOf(
+                    "state" to state
+                )
+            )
+
+            updateProgressRunnerState()
+        }
+
+        /**
+         * 处理播放/暂停状态
+         */
+        override fun onIsPlayingChanged(isPlaying: Boolean) {
+            sendEvent(
+                "onIsPlayingChanged", mapOf(
+                    "status" to isPlaying
+                )
+            )
+            updateProgressRunnerState()
+        }
+
+        /**
+         * 处理错误
+         */
+        override fun onPlayerError(error: PlaybackException) {
+            sendEvent(
+                "onPlayerError", mapOf(
+                    "code" to error.errorCode.toString(),
+                    "message" to (error.message ?: "Unknown Error")
+                )
+            )
+        }
+
+        override fun onRepeatModeChanged(repeatMode: Int) {
+            super.onRepeatModeChanged(repeatMode)
+            Storage.saveRepeatMode(repeatMode)
+        }
+
+        override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
+            super.onShuffleModeEnabledChanged(shuffleModeEnabled)
+            Storage.saveShuffleMode(shuffleModeEnabled)
+        }
+    }
 
     @OptIn(UnstableApi::class)
     override fun definition() = ModuleDefinition {
@@ -75,14 +189,16 @@ class ExpoOrpheusModule : Module() {
             controllerFuture = MediaController.Builder(context, sessionToken)
                 .setApplicationLooper(Looper.getMainLooper()).buildAsync()
 
-            controllerFuture?.addListener({
-                try {
-                    controller = controllerFuture?.get()
-                    setupListeners()
-                } catch (e: Exception) {
-                    e.printStackTrace()
+
+            OrpheusMusicService.addOnServiceReadyListener { service ->
+                mainHandler.post {
+                    if (this@ExpoOrpheusModule.player != service.player) {
+                        this@ExpoOrpheusModule.player?.removeListener(playerListener)
+                        this@ExpoOrpheusModule.player = service.player
+                        this@ExpoOrpheusModule.player?.addListener(playerListener)
+                    }
                 }
-            }, MoreExecutors.directExecutor())
+            }
 
             downloadManager = DownloadUtil.getDownloadManager(context)
             downloadManager?.addListener(downloadListener)
@@ -94,6 +210,9 @@ class ExpoOrpheusModule : Module() {
             mainHandler.removeCallbacks(downloadProgressRunnable)
             controllerFuture?.let { MediaController.releaseFuture(it) }
             downloadManager?.removeListener(downloadListener)
+            player?.removeListener(playerListener)
+            OrpheusMusicService.removeOnServiceReadyListener { }
+            player = null
             Log.d("Orpheus", "Destroy media controller")
         }
 
@@ -118,136 +237,136 @@ class ExpoOrpheusModule : Module() {
         }
 
         AsyncFunction("getPosition") {
-            checkController()
-            controller?.currentPosition?.toDouble()?.div(1000.0) ?: 0.0
+            checkPlayer()
+            player?.currentPosition?.toDouble()?.div(1000.0) ?: 0.0
         }.runOnQueue(Queues.MAIN)
 
         AsyncFunction("getDuration") {
-            checkController()
-            val d = controller?.duration ?: C.TIME_UNSET
+            checkPlayer()
+            val d = player?.duration ?: C.TIME_UNSET
             if (d == C.TIME_UNSET) 0.0 else d.toDouble() / 1000.0
         }.runOnQueue(Queues.MAIN)
 
         AsyncFunction("getBuffered") {
-            checkController()
-            controller?.bufferedPosition?.toDouble()?.div(1000.0) ?: 0.0
+            checkPlayer()
+            player?.bufferedPosition?.toDouble()?.div(1000.0) ?: 0.0
         }.runOnQueue(Queues.MAIN)
 
         AsyncFunction("getIsPlaying") {
-            checkController()
-            controller?.isPlaying ?: false
+            checkPlayer()
+            player?.isPlaying ?: false
         }.runOnQueue(Queues.MAIN)
 
         AsyncFunction("getCurrentIndex") {
-            checkController()
-            controller?.currentMediaItemIndex ?: -1
+            checkPlayer()
+            player?.currentMediaItemIndex ?: -1
         }.runOnQueue(Queues.MAIN)
 
         AsyncFunction("getCurrentTrack") {
-            checkController()
-            val player = controller ?: return@AsyncFunction null
-            val currentItem = player.currentMediaItem ?: return@AsyncFunction null
+            checkPlayer()
+            val p = player ?: return@AsyncFunction null
+            val currentItem = p.currentMediaItem ?: return@AsyncFunction null
 
             mediaItemToTrackRecord(currentItem)
         }.runOnQueue(Queues.MAIN)
 
         AsyncFunction("getShuffleMode") {
-            checkController()
-            controller?.shuffleModeEnabled
+            checkPlayer()
+            player?.shuffleModeEnabled
         }.runOnQueue(Queues.MAIN)
 
         AsyncFunction("getIndexTrack") { index: Int ->
-            checkController()
-            val player = controller ?: return@AsyncFunction null
+            checkPlayer()
+            val p = player ?: return@AsyncFunction null
 
-            if (index < 0 || index >= player.mediaItemCount) {
+            if (index < 0 || index >= p.mediaItemCount) {
                 return@AsyncFunction null
             }
 
-            val item = player.getMediaItemAt(index)
+            val item = p.getMediaItemAt(index)
 
             mediaItemToTrackRecord(item)
         }.runOnQueue(Queues.MAIN)
 
         AsyncFunction("play") {
-            checkController()
-            controller?.play()
+            checkPlayer()
+            player?.play()
         }.runOnQueue(Queues.MAIN)
 
         AsyncFunction("pause") {
-            checkController()
-            controller?.pause()
+            checkPlayer()
+            player?.pause()
         }.runOnQueue(Queues.MAIN)
 
         AsyncFunction("clear") {
-            checkController()
-            controller?.clearMediaItems()
+            checkPlayer()
+            player?.clearMediaItems()
             durationCache.clear()
             DownloadUtil.itemVolumeMap.clear()
         }.runOnQueue(Queues.MAIN)
 
         AsyncFunction("skipTo") { index: Int ->
             // 跳转到指定索引的开头
-            checkController()
-            controller?.seekTo(index, C.TIME_UNSET)
+            checkPlayer()
+            player?.seekTo(index, C.TIME_UNSET)
         }.runOnQueue(Queues.MAIN)
 
         AsyncFunction("skipToNext") {
-            checkController()
-            if (controller?.hasNextMediaItem() == true) {
-                controller?.seekToNextMediaItem()
+            checkPlayer()
+            if (player?.hasNextMediaItem() == true) {
+                player?.seekToNextMediaItem()
             }
         }.runOnQueue(Queues.MAIN)
 
         AsyncFunction("skipToPrevious") {
-            checkController()
-            if (controller?.hasPreviousMediaItem() == true) {
-                controller?.seekToPreviousMediaItem()
+            checkPlayer()
+            if (player?.hasPreviousMediaItem() == true) {
+                player?.seekToPreviousMediaItem()
             }
         }.runOnQueue(Queues.MAIN)
 
         AsyncFunction("seekTo") { seconds: Double ->
-            checkController()
+            checkPlayer()
             val ms = (seconds * 1000).toLong()
-            controller?.seekTo(ms)
+            player?.seekTo(ms)
         }.runOnQueue(Queues.MAIN)
 
         AsyncFunction("setRepeatMode") { mode: Int ->
-            checkController()
+            checkPlayer()
             // mode: 0=OFF, 1=TRACK, 2=QUEUE
             val repeatMode = when (mode) {
                 1 -> Player.REPEAT_MODE_ONE
                 2 -> Player.REPEAT_MODE_ALL
                 else -> Player.REPEAT_MODE_OFF
             }
-            controller?.repeatMode = repeatMode
+            player?.repeatMode = repeatMode
         }.runOnQueue(Queues.MAIN)
 
         AsyncFunction("setShuffleMode") { enabled: Boolean ->
-            checkController()
-            controller?.shuffleModeEnabled = enabled
+            checkPlayer()
+            player?.shuffleModeEnabled = enabled
         }.runOnQueue(Queues.MAIN)
 
         AsyncFunction("getRepeatMode") {
-            checkController()
-            controller?.repeatMode
+            checkPlayer()
+            player?.repeatMode
         }.runOnQueue(Queues.MAIN)
 
         AsyncFunction("removeTrack") { index: Int ->
-            checkController()
-            if (index >= 0 && index < (controller?.mediaItemCount ?: 0)) {
-                controller?.removeMediaItem(index)
+            checkPlayer()
+            if (index >= 0 && index < (player?.mediaItemCount ?: 0)) {
+                player?.removeMediaItem(index)
             }
         }.runOnQueue(Queues.MAIN)
 
         AsyncFunction("getQueue") {
-            checkController()
-            val player = controller ?: return@AsyncFunction emptyList<TrackRecord>()
-            val count = player.mediaItemCount
+            checkPlayer()
+            val p = player ?: return@AsyncFunction emptyList<TrackRecord>()
+            val count = p.mediaItemCount
             val queue = ArrayList<TrackRecord>(count)
 
             for (i in 0 until count) {
-                val item = player.getMediaItemAt(i)
+                val item = p.getMediaItemAt(i)
                 queue.add(mediaItemToTrackRecord(item))
             }
 
@@ -255,59 +374,32 @@ class ExpoOrpheusModule : Module() {
         }.runOnQueue(Queues.MAIN)
 
         AsyncFunction("setSleepTimer") { durationMs: Long ->
-            checkController()
-            val command = SessionCommand(CustomCommands.CMD_START_TIMER, Bundle.EMPTY)
-            val args = Bundle().apply {
-                putLong(CustomCommands.KEY_DURATION, durationMs)
-            }
-
-            controller?.sendCustomCommand(command, args)
+            OrpheusMusicService.instance?.startSleepTimer(durationMs)
             return@AsyncFunction null
         }.runOnQueue(Queues.MAIN)
 
         AsyncFunction("getSleepTimerEndTime") {
-            checkController()
-
-            val command = SessionCommand(CustomCommands.CMD_GET_REMAINING, Bundle.EMPTY)
-            val future = controller!!.sendCustomCommand(command, Bundle.EMPTY)
-
-            val result = try {
-                future.get()
-            } catch (e: Exception) {
-                throw CodedException("ERR_EXECUTION_FAILED", e.message, e)
-            }
-
-            if (result.resultCode == SessionResult.RESULT_SUCCESS) {
-                val extras = result.extras
-                if (extras.containsKey(CustomCommands.KEY_STOP_TIME)) {
-                    val stopTime = extras.getLong(CustomCommands.KEY_STOP_TIME)
-                    return@AsyncFunction stopTime
-                }
-            }
-
-            return@AsyncFunction null
+            return@AsyncFunction OrpheusMusicService.instance?.getSleepTimerRemaining()
         }.runOnQueue(Queues.MAIN)
 
         AsyncFunction("cancelSleepTimer") {
-            checkController()
-            val command = SessionCommand(CustomCommands.CMD_CANCEL_TIMER, Bundle.EMPTY)
-            controller?.sendCustomCommand(command, Bundle.EMPTY)
+            OrpheusMusicService.instance?.cancelSleepTimer()
             return@AsyncFunction null
         }.runOnQueue(Queues.MAIN)
 
         AsyncFunction("addToEnd") { tracks: List<TrackRecord>, startFromId: String?, clearQueue: Boolean? ->
-            checkController()
+            checkPlayer()
             val mediaItems = tracks.map { track ->
                 track.toMediaItem(gson)
             }
-            val player = controller ?: return@AsyncFunction
+            val p = player ?: return@AsyncFunction
             if (clearQueue == true) {
-                player.clearMediaItems()
+                p.clearMediaItems()
                 durationCache.clear()
                 DownloadUtil.itemVolumeMap.clear()
             }
-            val initialSize = player.mediaItemCount
-            player.addMediaItems(mediaItems)
+            val initialSize = p.mediaItemCount
+            p.addMediaItems(mediaItems)
 
             if (!startFromId.isNullOrEmpty()) {
                 val relativeIndex = tracks.indexOfFirst { it.id == startFromId }
@@ -315,50 +407,50 @@ class ExpoOrpheusModule : Module() {
                 if (relativeIndex != -1) {
                     val targetIndex = initialSize + relativeIndex
 
-                    player.seekTo(targetIndex, C.TIME_UNSET)
-                    player.prepare()
-                    player.play()
+                    p.seekTo(targetIndex, C.TIME_UNSET)
+                    p.prepare()
+                    p.play()
 
                     return@AsyncFunction
                 }
             }
 
-            if (player.playbackState == Player.STATE_IDLE) {
-                player.prepare()
+            if (p.playbackState == Player.STATE_IDLE) {
+                p.prepare()
             }
         }.runOnQueue(Queues.MAIN)
 
         AsyncFunction("playNext") { track: TrackRecord ->
-            checkController()
-            val player = controller ?: return@AsyncFunction
+            checkPlayer()
+            val p = player ?: return@AsyncFunction
 
             val mediaItem = track.toMediaItem(gson)
-            val targetIndex = player.currentMediaItemIndex + 1
+            val targetIndex = p.currentMediaItemIndex + 1
 
             var existingIndex = -1
-            for (i in 0 until player.mediaItemCount) {
-                if (player.getMediaItemAt(i).mediaId == track.id) {
+            for (i in 0 until p.mediaItemCount) {
+                if (p.getMediaItemAt(i).mediaId == track.id) {
                     existingIndex = i
                     break
                 }
             }
 
             if (existingIndex != -1) {
-                if (existingIndex == player.currentMediaItemIndex) {
+                if (existingIndex == p.currentMediaItemIndex) {
                     return@AsyncFunction
                 }
-                val safeTargetIndex = targetIndex.coerceAtMost(player.mediaItemCount)
+                val safeTargetIndex = targetIndex.coerceAtMost(p.mediaItemCount)
 
-                player.moveMediaItem(existingIndex, safeTargetIndex)
+                p.moveMediaItem(existingIndex, safeTargetIndex)
 
             } else {
-                val safeTargetIndex = targetIndex.coerceAtMost(player.mediaItemCount)
+                val safeTargetIndex = targetIndex.coerceAtMost(p.mediaItemCount)
 
-                player.addMediaItem(safeTargetIndex, mediaItem)
+                p.addMediaItem(safeTargetIndex, mediaItem)
             }
 
-            if (player.playbackState == Player.STATE_IDLE) {
-                player.prepare()
+            if (p.playbackState == Player.STATE_IDLE) {
+                p.prepare()
             }
         }.runOnQueue(Queues.MAIN)
 
@@ -555,139 +647,19 @@ class ExpoOrpheusModule : Module() {
         }
     }
 
-    private fun setupListeners() {
-        controller?.addListener(object : Player.Listener {
-
-            /**
-             * 核心：处理切歌、播放结束逻辑
-             */
-            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-                val newId = mediaItem?.mediaId ?: ""
-                Log.e("Orpheus", "onMediaItemTransition: $reason")
-
-                sendEvent(
-                    "onTrackStarted", mapOf(
-                        "trackId" to newId,
-                        "reason" to reason
-                    )
-                )
-
-                lastMediaId = newId
-                saveCurrentPosition()
-            }
-
-            override fun onTimelineChanged(timeline: Timeline, reason: Int) {
-                val player = controller ?: return
-                val currentItem = player.currentMediaItem ?: return
-                val mediaId = currentItem.mediaId
-
-                val duration = player.duration
-                Log.d(
-                    "Orpheus",
-                    "onTimelineChanged: reason: $reason mediaId: $mediaId duration: $duration"
-                )
-
-                if (duration != C.TIME_UNSET && duration > 0) {
-                    durationCache[mediaId] = duration
-                }
-            }
-
-            override fun onPositionDiscontinuity(
-                oldPosition: Player.PositionInfo,
-                newPosition: Player.PositionInfo,
-                reason: Int
-            ) {
-                val isAutoTransition = reason == Player.DISCONTINUITY_REASON_AUTO_TRANSITION
-                val isIndexChanged = oldPosition.mediaItemIndex != newPosition.mediaItemIndex
-                val lastMediaItem = oldPosition.mediaItem ?: return
-                val currentTime = System.currentTimeMillis()
-                if ((currentTime - lastTrackFinishedAt) < 200) {
-                    return
-                }
-
-                Log.d(
-                    "Orpheus",
-                    "onPositionDiscontinuity: isAutoTransition:$isAutoTransition isIndexChanged: $isIndexChanged durationCache:$durationCache"
-                )
-
-                if (isAutoTransition || isIndexChanged) {
-
-                    val duration = durationCache[lastMediaItem.mediaId] ?: return
-                    lastTrackFinishedAt = currentTime
-
-                    sendEvent(
-                        "onTrackFinished", mapOf(
-                            "trackId" to lastMediaItem.mediaId,
-                            "finalPosition" to oldPosition.positionMs / 1000.0,
-                            "duration" to duration / 1000.0,
-                        )
-                    )
-                }
-            }
-
-            /**
-             * 处理播放状态改变
-             */
-            override fun onPlaybackStateChanged(state: Int) {
-                // state: 1=IDLE, 2=BUFFERING, 3=READY, 4=ENDED
-                sendEvent(
-                    "onPlaybackStateChanged", mapOf(
-                        "state" to state
-                    )
-                )
-
-                updateProgressRunnerState()
-            }
-
-            /**
-             * 处理播放/暂停状态
-             */
-            override fun onIsPlayingChanged(isPlaying: Boolean) {
-                sendEvent(
-                    "onIsPlayingChanged", mapOf(
-                        "status" to isPlaying
-                    )
-                )
-                updateProgressRunnerState()
-            }
-
-            /**
-             * 处理错误
-             */
-            override fun onPlayerError(error: PlaybackException) {
-                sendEvent(
-                    "onPlayerError", mapOf(
-                        "code" to error.errorCode.toString(),
-                        "message" to (error.message ?: "Unknown Error")
-                    )
-                )
-            }
-
-            override fun onRepeatModeChanged(repeatMode: Int) {
-                super.onRepeatModeChanged(repeatMode)
-                Storage.saveRepeatMode(repeatMode)
-            }
-
-            override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
-                super.onShuffleModeEnabledChanged(shuffleModeEnabled)
-                Storage.saveShuffleMode(shuffleModeEnabled)
-            }
-        })
-    }
-
     private val progressSendEventRunnable = object : Runnable {
         override fun run() {
-            val player = controller ?: return
+            val p = player ?: return
 
-            if (player.isPlaying) {
-                val currentMs = player.currentPosition
-                val durationMs = player.duration
+            if (p.isPlaying) {
+                val currentMs = p.currentPosition
+                val durationMs = p.duration
 
                 sendEvent(
                     "onPositionUpdate", mapOf(
                         "position" to currentMs / 1000.0,
                         "duration" to if (durationMs == C.TIME_UNSET) 0.0 else durationMs / 1000.0,
-                        "buffered" to player.bufferedPosition / 1000.0
+                        "buffered" to p.bufferedPosition / 1000.0
                     )
                 )
             }
@@ -704,9 +676,9 @@ class ExpoOrpheusModule : Module() {
     }
 
     private fun updateProgressRunnerState() {
-        val player = controller
+        val p = player
         // 如果正在播放且状态是 READY，则开始轮询
-        if (player != null && player.isPlaying && player.playbackState == Player.STATE_READY) {
+        if (p != null && p.isPlaying && p.playbackState == Player.STATE_READY) {
             mainHandler.removeCallbacks(progressSendEventRunnable)
             mainHandler.removeCallbacks(progressSaveRunnable)
             mainHandler.post(progressSaveRunnable)
@@ -740,17 +712,17 @@ class ExpoOrpheusModule : Module() {
     }
 
     private fun saveCurrentPosition() {
-        val player = controller ?: return
-        if (player.playbackState != Player.STATE_IDLE) {
+        val p = player ?: return
+        if (p.playbackState != Player.STATE_IDLE) {
             Storage.savePosition(
-                player.currentMediaItemIndex,
-                player.currentPosition
+                p.currentMediaItemIndex,
+                p.currentPosition
             )
         }
     }
 
-    private fun checkController() {
-        if (controller == null) {
+    private fun checkPlayer() {
+        if (player == null) {
             throw ControllerNotInitializedException()
         }
     }

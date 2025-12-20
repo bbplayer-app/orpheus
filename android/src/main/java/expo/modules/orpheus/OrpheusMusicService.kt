@@ -2,21 +2,17 @@ package expo.modules.orpheus
 
 import android.app.PendingIntent
 import android.content.Intent
-import android.os.Bundle
 import androidx.annotation.OptIn
 import androidx.core.net.toUri
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.Player
 import androidx.media3.common.Timeline
-import androidx.media3.common.util.Log
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
-import androidx.media3.session.SessionCommand
-import androidx.media3.session.SessionResult
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import expo.modules.orpheus.bilibili.VolumeData
@@ -33,15 +29,37 @@ import kotlin.math.abs
 
 class OrpheusMusicService : MediaLibraryService() {
 
-    private var player: ExoPlayer? = null
+    var player: ExoPlayer? = null
     private var mediaSession: MediaLibrarySession? = null
     private var sleepTimerManager: SleepTimeController? = null
     private var volumeFadeJob: Job? = null
     private var scope = MainScope()
 
+    companion object {
+        var instance: OrpheusMusicService? = null
+            private set(value) {
+                field = value
+                if (value != null) {
+                    listeners.forEach { it(value) }
+                }
+            }
+
+        private val listeners = mutableListOf<(OrpheusMusicService) -> Unit>()
+
+        fun addOnServiceReadyListener(listener: (OrpheusMusicService) -> Unit) {
+            instance?.let { listener(it) }
+            listeners.add(listener)
+        }
+
+        fun removeOnServiceReadyListener(listener: (OrpheusMusicService) -> Unit) {
+            listeners.remove(listener)
+        }
+    }
+
     @OptIn(UnstableApi::class)
     override fun onCreate() {
         super.onCreate()
+        instance = this
 
         Storage.initialize(this)
 
@@ -113,6 +131,7 @@ class OrpheusMusicService : MediaLibraryService() {
 
     override fun onDestroy() {
         scope.cancel()
+        instance = null
 
         mediaSession?.run {
             player.release()
@@ -122,69 +141,28 @@ class OrpheusMusicService : MediaLibraryService() {
         super.onDestroy()
     }
 
+    fun startSleepTimer(durationMs: Long) {
+        sleepTimerManager?.start(durationMs)
+    }
+
+    fun cancelSleepTimer() {
+        sleepTimerManager?.cancel()
+    }
+
+    fun getSleepTimerRemaining(): Long? {
+        return sleepTimerManager?.getStopTimeMs()
+    }
+
     var callback: MediaLibrarySession.Callback = @UnstableApi
     object : MediaLibrarySession.Callback {
-        private val customCommands = listOf(
-            SessionCommand(CustomCommands.CMD_START_TIMER, Bundle.EMPTY),
-            SessionCommand(CustomCommands.CMD_CANCEL_TIMER, Bundle.EMPTY),
-            SessionCommand(CustomCommands.CMD_GET_REMAINING, Bundle.EMPTY)
-        )
 
         @OptIn(UnstableApi::class)
         override fun onConnect(
             session: MediaSession,
             controller: MediaSession.ControllerInfo
         ): MediaSession.ConnectionResult {
-            val availableCommandsBuilder =
-                MediaSession.ConnectionResult.DEFAULT_SESSION_COMMANDS.buildUpon()
-
-            for (command in customCommands) {
-                availableCommandsBuilder.add(command)
-            }
-
             return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
-                .setAvailableSessionCommands(availableCommandsBuilder.build())
                 .build()
-        }
-
-        override fun onCustomCommand(
-            session: MediaSession,
-            controller: MediaSession.ControllerInfo,
-            customCommand: SessionCommand,
-            args: Bundle
-        ): ListenableFuture<SessionResult> {
-
-            Log.d("Orpheus", "onCustomCommand: ${customCommand.customAction}")
-
-            when (customCommand.customAction) {
-                CustomCommands.CMD_START_TIMER -> {
-                    val durationMs = args.getLong(CustomCommands.KEY_DURATION)
-                    sleepTimerManager?.start(durationMs)
-                    return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
-                }
-
-                CustomCommands.CMD_CANCEL_TIMER -> {
-                    sleepTimerManager?.cancel()
-                    return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
-                }
-
-                CustomCommands.CMD_GET_REMAINING -> {
-                    val stopTime = sleepTimerManager?.getStopTimeMs()
-                    val resultBundle = Bundle()
-                    if (stopTime != null) {
-                        resultBundle.putLong(CustomCommands.KEY_STOP_TIME, stopTime)
-                    }
-
-                    return Futures.immediateFuture(
-                        SessionResult(
-                            SessionResult.RESULT_SUCCESS,
-                            resultBundle
-                        )
-                    )
-                }
-            }
-
-            return super.onCustomCommand(session, controller, customCommand, args)
         }
 
         /**
@@ -235,7 +213,6 @@ class OrpheusMusicService : MediaLibraryService() {
 
     private fun setupListeners() {
         player?.addListener(object : Player.Listener {
-
             @OptIn(UnstableApi::class)
             override fun onMediaItemTransition(
                 mediaItem: androidx.media3.common.MediaItem?,

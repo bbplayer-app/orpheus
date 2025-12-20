@@ -94,6 +94,7 @@ class ExpoOrpheusModule : Module() {
             mainHandler.removeCallbacks(downloadProgressRunnable)
             controllerFuture?.let { MediaController.releaseFuture(it) }
             downloadManager?.removeListener(downloadListener)
+            Log.d("Orpheus", "Destroy media controller")
         }
 
         Constant("restorePlaybackPositionEnabled") {
@@ -261,6 +262,7 @@ class ExpoOrpheusModule : Module() {
             }
 
             controller?.sendCustomCommand(command, args)
+            return@AsyncFunction null
         }.runOnQueue(Queues.MAIN)
 
         AsyncFunction("getSleepTimerEndTime") {
@@ -290,6 +292,7 @@ class ExpoOrpheusModule : Module() {
             checkController()
             val command = SessionCommand(CustomCommands.CMD_CANCEL_TIMER, Bundle.EMPTY)
             controller?.sendCustomCommand(command, Bundle.EMPTY)
+            return@AsyncFunction null
         }.runOnQueue(Queues.MAIN)
 
         AsyncFunction("addToEnd") { tracks: List<TrackRecord>, startFromId: String?, clearQueue: Boolean? ->

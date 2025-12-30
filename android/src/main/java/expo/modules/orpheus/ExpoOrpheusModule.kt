@@ -25,7 +25,8 @@ import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import expo.modules.orpheus.models.TrackRecord
 import expo.modules.orpheus.utils.DownloadUtil
-import expo.modules.orpheus.utils.Storage
+import expo.modules.orpheus.utils.GeneralStorage
+import expo.modules.orpheus.utils.LoudnessStorage
 import expo.modules.orpheus.utils.toMediaItem
 
 @UnstableApi
@@ -156,12 +157,12 @@ class ExpoOrpheusModule : Module() {
 
         override fun onRepeatModeChanged(repeatMode: Int) {
             super.onRepeatModeChanged(repeatMode)
-            Storage.saveRepeatMode(repeatMode)
+            GeneralStorage.saveRepeatMode(repeatMode)
         }
 
         override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
             super.onShuffleModeEnabledChanged(shuffleModeEnabled)
-            Storage.saveShuffleMode(shuffleModeEnabled)
+            GeneralStorage.saveShuffleMode(shuffleModeEnabled)
         }
     }
 
@@ -181,7 +182,8 @@ class ExpoOrpheusModule : Module() {
 
         OnCreate {
             val context = appContext.reactContext ?: return@OnCreate
-            Storage.initialize(context)
+            GeneralStorage.initialize(context)
+            LoudnessStorage.initialize(context)
             val sessionToken = SessionToken(
                 context,
                 ComponentName(context, OrpheusMusicService::class.java)
@@ -217,11 +219,11 @@ class ExpoOrpheusModule : Module() {
         }
 
         Constant("restorePlaybackPositionEnabled") {
-            Storage.isRestoreEnabled()
+            GeneralStorage.isRestoreEnabled()
         }
 
         Constant("loudnessNormalizationEnabled") {
-            Storage.isLoudnessNormalizationEnabled()
+            GeneralStorage.isLoudnessNormalizationEnabled()
         }
 
         Function("setBilibiliCookie") { cookie: String ->
@@ -229,11 +231,11 @@ class ExpoOrpheusModule : Module() {
         }
 
         Function("setLoudnessNormalizationEnabled") { enabled: Boolean ->
-            Storage.setLoudnessNormalizationEnabled(enabled)
+            GeneralStorage.setLoudnessNormalizationEnabled(enabled)
         }
 
         Function("setRestorePlaybackPositionEnabled") { enabled: Boolean ->
-            Storage.setRestoreEnabled(enabled)
+            GeneralStorage.setRestoreEnabled(enabled)
         }
 
         AsyncFunction("getPosition") {
@@ -302,7 +304,6 @@ class ExpoOrpheusModule : Module() {
             checkPlayer()
             player?.clearMediaItems()
             durationCache.clear()
-            DownloadUtil.itemVolumeMap.clear()
         }.runOnQueue(Queues.MAIN)
 
         AsyncFunction("skipTo") { index: Int ->
@@ -396,7 +397,6 @@ class ExpoOrpheusModule : Module() {
             if (clearQueue == true) {
                 p.clearMediaItems()
                 durationCache.clear()
-                DownloadUtil.itemVolumeMap.clear()
             }
             val initialSize = p.mediaItemCount
             p.addMediaItems(mediaItems)
@@ -714,7 +714,7 @@ class ExpoOrpheusModule : Module() {
     private fun saveCurrentPosition() {
         val p = player ?: return
         if (p.playbackState != Player.STATE_IDLE) {
-            Storage.savePosition(
+            GeneralStorage.savePosition(
                 p.currentMediaItemIndex,
                 p.currentPosition
             )

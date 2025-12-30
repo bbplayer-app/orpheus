@@ -1,6 +1,7 @@
 package expo.modules.orpheus.utils
 
 import android.content.Context
+import android.util.Log
 import androidx.core.net.toUri
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.database.StandaloneDatabaseProvider
@@ -35,15 +36,6 @@ object DownloadUtil {
 
     private var downloadNotificationHelper: DownloadNotificationHelper? = null
 
-    var itemVolumeMap: MutableMap<String, VolumeData> = mutableMapOf()
-
-    private val _volumeResolvedEvent = MutableSharedFlow<Pair<String, VolumeData>>(
-        replay = 0,
-        extraBufferCapacity = 1,
-        onBufferOverflow = BufferOverflow.DROP_OLDEST
-    )
-    val volumeResolvedEvent = _volumeResolvedEvent.asSharedFlow()
-
     @Synchronized
     fun getDownloadManager(context: Context): DownloadManager {
         if (downloadManager == null) {
@@ -68,10 +60,16 @@ object DownloadUtil {
             val upstreamFactory = getUpstreamFactory()
 
             val downloadCache = DownloadCache.getStableCache(context)
+            val lruCache = DownloadCache.getLruCache(context)
+
+            val cacheFactory = CacheDataSource.Factory()
+                .setCache(lruCache)
+                .setUpstreamDataSourceFactory(upstreamFactory)
+                .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
 
             val downloadFactory = CacheDataSource.Factory()
                 .setCache(downloadCache)
-                .setUpstreamDataSourceFactory(upstreamFactory)
+                .setUpstreamDataSourceFactory(cacheFactory)
                 .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
                 .setCacheWriteDataSinkFactory(null)
 
@@ -109,10 +107,6 @@ object DownloadUtil {
         return downloadNotificationHelper!!
     }
 
-    suspend fun emitVolumeEvent(uri: String, data: VolumeData) {
-        _volumeResolvedEvent.emit(uri to data)
-    }
-
     private class BilibiliResolver :
         ResolvingDataSource.Resolver {
         override fun resolveDataSpec(dataSpec: DataSpec): DataSpec {
@@ -132,10 +126,8 @@ object DownloadUtil {
                     )
                     // 在这里保存响度均衡数据，并且直接发一个事件，在 OrpheusMusicService 监听
                     if (volume !== null) {
-                        itemVolumeMap[dataSpec.uri.toString()] = volume
-                        CoroutineScope(Dispatchers.IO).launch {
-                            emitVolumeEvent(dataSpec.uri.toString(), volume)
-                        }
+                        Log.d("LoudnessNormalization", "uri: ${dataSpec.uri}, measuredI: ${volume.measuredI}")
+                        LoudnessStorage.setLoudnessData(dataSpec.uri.toString(), volume.measuredI)
                     }
 
                     val headers = HashMap<String, String>()

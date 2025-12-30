@@ -11,7 +11,7 @@ import com.tencent.mmkv.MMKV
 import expo.modules.orpheus.models.TrackRecord
 
 @OptIn(UnstableApi::class)
-object Storage {
+object GeneralStorage {
     private var kv: MMKV? = null
     private val gson = Gson()
     private const val KEY_RESTORE_POSITION_ENABLED = "config_restore_position_enabled"

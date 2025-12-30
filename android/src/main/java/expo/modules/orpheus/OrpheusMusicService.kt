@@ -2,6 +2,7 @@ package expo.modules.orpheus
 
 import android.app.PendingIntent
 import android.content.Intent
+import android.util.Log
 import androidx.annotation.OptIn
 import androidx.core.net.toUri
 import androidx.media3.common.AudioAttributes
@@ -15,10 +16,10 @@ import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
-import expo.modules.orpheus.bilibili.VolumeData
 import expo.modules.orpheus.utils.DownloadUtil
 import expo.modules.orpheus.utils.SleepTimeController
-import expo.modules.orpheus.utils.Storage
+import expo.modules.orpheus.utils.GeneralStorage
+import expo.modules.orpheus.utils.LoudnessStorage
 import expo.modules.orpheus.utils.calculateLoudnessGain
 import expo.modules.orpheus.utils.fadeInTo
 import kotlinx.coroutines.Job
@@ -61,7 +62,8 @@ class OrpheusMusicService : MediaLibraryService() {
         super.onCreate()
         instance = this
 
-        Storage.initialize(this)
+        GeneralStorage.initialize(this)
+        LoudnessStorage.initialize(this)
 
 
         val dataSourceFactory = DownloadUtil.getPlayerDataSourceFactory(this)
@@ -111,18 +113,8 @@ class OrpheusMusicService : MediaLibraryService() {
             .setSessionActivity(contentIntent)
             .build()
 
-        restorePlayerState(Storage.isRestoreEnabled())
+        restorePlayerState(GeneralStorage.isRestoreEnabled())
         sleepTimerManager = SleepTimeController(player!!)
-
-        // 当有新的响度数据时，如果是当前这首歌的就直接应用，否则是预加载，等待 onMediaItemTransition 处理
-        scope.launch {
-            DownloadUtil.volumeResolvedEvent.collect { (uri, volumeData) ->
-                val currentUri = player?.currentMediaItem?.localConfiguration?.uri?.toString()
-                if (currentUri == uri) {
-                    applyVolumeForCurrentItem(volumeData)
-                }
-            }
-        }
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? {
@@ -187,15 +179,15 @@ class OrpheusMusicService : MediaLibraryService() {
     private fun restorePlayerState(restorePosition: Boolean) {
         val player = player ?: return
 
-        val restoredItems = Storage.restoreQueue()
+        val restoredItems = GeneralStorage.restoreQueue()
 
         if (restoredItems.isNotEmpty()) {
             player.setMediaItems(restoredItems)
 
-            val savedIndex = Storage.getSavedIndex()
-            val savedPosition = Storage.getSavedPosition()
-            val savedShuffleMode = Storage.getShuffleMode()
-            val savedRepeatMode = Storage.getRepeatMode()
+            val savedIndex = GeneralStorage.getSavedIndex()
+            val savedPosition = GeneralStorage.getSavedPosition()
+            val savedShuffleMode = GeneralStorage.getShuffleMode()
+            val savedRepeatMode = GeneralStorage.getRepeatMode()
 
             if (savedIndex >= 0 && savedIndex < restoredItems.size) {
                 player.seekTo(savedIndex, if (restorePosition) savedPosition else C.TIME_UNSET)
@@ -221,10 +213,8 @@ class OrpheusMusicService : MediaLibraryService() {
                 saveCurrentQueue()
                 val uri = mediaItem?.localConfiguration?.uri?.toString() ?: return
 
-                val volumeData = DownloadUtil.itemVolumeMap[uri]
-                if (volumeData != null) {
-                    applyVolumeForCurrentItem(volumeData)
-                }
+                val volumeData = LoudnessStorage.getLoudnessData(uri)
+                applyVolumeForCurrentItem(volumeData)
             }
 
             override fun onTimelineChanged(timeline: Timeline, reason: Int) {
@@ -237,21 +227,20 @@ class OrpheusMusicService : MediaLibraryService() {
         val player = player ?: return
         val queue = List(player.mediaItemCount) { i -> player.getMediaItemAt(i) }
         if (queue.isNotEmpty()) {
-            Storage.saveQueue(queue)
+            GeneralStorage.saveQueue(queue)
         }
     }
 
     @OptIn(UnstableApi::class)
-    private fun applyVolumeForCurrentItem(volumeData: VolumeData) {
+    private fun applyVolumeForCurrentItem(measuredI: Double) {
+        Log.d("LoudnessNormalization", "measuredI: $measuredI")
         val player = player ?: return
         volumeFadeJob?.cancel()
-        val isLoudnessNormalizationEnabled = Storage.isLoudnessNormalizationEnabled()
+        val isLoudnessNormalizationEnabled = GeneralStorage.isLoudnessNormalizationEnabled()
         if (!isLoudnessNormalizationEnabled) return
         val gain = run {
-            val measured = volumeData.measuredI
-            val target = volumeData.targetI
-
-            if (measured == 0.0) 1.0f else calculateLoudnessGain(measured, target)
+            val target = -14.0 // bilibili 的这个值似乎是固定的
+            if (measuredI == 0.0) 1.0f else calculateLoudnessGain(measuredI, target)
         }
 
         val targetVol = 1.0f * gain

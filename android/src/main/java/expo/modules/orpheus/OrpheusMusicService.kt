@@ -19,6 +19,7 @@ import com.google.common.util.concurrent.ListenableFuture
 import expo.modules.orpheus.utils.DownloadUtil
 import expo.modules.orpheus.utils.SleepTimeController
 import expo.modules.orpheus.utils.GeneralStorage
+import expo.modules.orpheus.utils.GlideBitmapLoader
 import expo.modules.orpheus.utils.LoudnessStorage
 import expo.modules.orpheus.utils.calculateLoudnessGain
 import expo.modules.orpheus.utils.fadeInTo
@@ -111,6 +112,7 @@ class OrpheusMusicService : MediaLibraryService() {
         mediaSession = MediaLibrarySession.Builder(this, player!!, callback)
             .setId("OrpheusSession")
             .setSessionActivity(contentIntent)
+            .setBitmapLoader(GlideBitmapLoader(this))
             .build()
 
         restorePlayerState(GeneralStorage.isRestoreEnabled())

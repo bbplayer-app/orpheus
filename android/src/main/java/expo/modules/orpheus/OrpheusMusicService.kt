@@ -198,7 +198,7 @@ class OrpheusMusicService : MediaLibraryService() {
             player.shuffleModeEnabled = savedShuffleMode
             player.repeatMode = savedRepeatMode
 
-            player.playWhenReady = false
+            player.playWhenReady = GeneralStorage.isAutoplayOnStartEnabled()
             player.prepare()
         }
     }

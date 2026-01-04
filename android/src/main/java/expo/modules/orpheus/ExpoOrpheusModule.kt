@@ -226,6 +226,14 @@ class ExpoOrpheusModule : Module() {
             GeneralStorage.isLoudnessNormalizationEnabled()
         }
 
+        Constant("autoplayOnStartEnabled") {
+            GeneralStorage.isAutoplayOnStartEnabled()
+        }
+
+        Function("setAutoplayOnStartEnabled") { enabled: Boolean ->
+            GeneralStorage.setAutoplayOnStartEnabled(enabled)
+        }
+
         Function("setBilibiliCookie") { cookie: String ->
             OrpheusConfig.bilibiliCookie = cookie
         }

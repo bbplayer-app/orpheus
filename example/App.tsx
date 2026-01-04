@@ -55,13 +55,15 @@ export default function OrpheusTestScreen() {
   const {track: currentTrack} = useCurrentTrack()
   const [restorePlaybackPositionEnabled, setRestorePlaybackPositionEnabled] = useState(false);
   const [downloadTasks, setDownloadTasks] = useState<any[]>([]);
+  const [autoplay, setAutoplay] = useState(false);
   
   // 调试信息
   const [lastEventLog, setLastEventLog] = useState<string>('Ready');
 
   useEffect(() => {
     setRestorePlaybackPositionEnabled(Orpheus.restorePlaybackPositionEnabled)
-  }, [restorePlaybackPositionEnabled]);
+    setAutoplay(Orpheus.autoplayOnStartEnabled)
+  }, [restorePlaybackPositionEnabled, autoplay]);
 
   // --- 初始化与监听 ---
   useEffect(() => {
@@ -346,6 +348,11 @@ export default function OrpheusTestScreen() {
 
             <Button title={(restorePlaybackPositionEnabled ? 'Disabled' : 'Enabled') + "Restore Playback Position"} onPress={() => {
               Orpheus.setRestorePlaybackPositionEnabled(true);
+              setRestorePlaybackPositionEnabled(Orpheus.restorePlaybackPositionEnabled)
+            }} />
+
+            <Button title={(autoplay ? 'Disabled' : 'Enabled') + "Autoplay on start"} onPress={() => {
+              Orpheus.setAutoplayOnStartEnabled(true);
               setRestorePlaybackPositionEnabled(Orpheus.restorePlaybackPositionEnabled)
             }} />
 

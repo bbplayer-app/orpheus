@@ -1,16 +1,14 @@
 package expo.modules.orpheus.utils
 
 import android.content.Context
+import android.util.Log
 import androidx.annotation.OptIn
 import androidx.media3.common.MediaItem
-import androidx.media3.common.util.Log
-import androidx.media3.common.util.UnstableApi
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import com.tencent.mmkv.MMKV
 import expo.modules.orpheus.models.TrackRecord
 
-@OptIn(UnstableApi::class)
 object GeneralStorage {
     private var kv: MMKV? = null
     private val gson = Gson()
@@ -22,6 +20,7 @@ object GeneralStorage {
     private const val KEY_SAVED_POSITION = "saved_position"
     private const val KEY_SAVED_REPEAT_MODE = "saved_repeat_mode"
     private const val KEY_SAVED_SHUFFLE_MODE = "saved_shuffle_mode"
+    private const val KEY_AUTOPLAY_ON_START_ENABLED = "config_autoplay_on_start_enabled"
 
 
     @Synchronized
@@ -59,7 +58,18 @@ object GeneralStorage {
         return safeKv.decodeBool(KEY_LOUDNESS_NORMALIZATION_ENABLED, true)
     }
 
-    @OptIn(UnstableApi::class)
+    fun isAutoplayOnStartEnabled(): Boolean {
+        return safeKv.decodeBool(KEY_AUTOPLAY_ON_START_ENABLED, false)
+    }
+
+    fun setAutoplayOnStartEnabled(enabled: Boolean) {
+        try {
+            safeKv.encode(KEY_AUTOPLAY_ON_START_ENABLED, enabled)
+        } catch (e: Exception) {
+            Log.e("MediaItemStorer", "Failed to set autoplay on start enabled", e)
+        }
+    }
+
     fun saveQueue(mediaItems: List<MediaItem>) {
         try {
             val jsonList = mediaItems.mapNotNull { item ->

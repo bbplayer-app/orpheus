@@ -55,6 +55,7 @@ declare class OrpheusModule extends NativeModule<OrpheusEvents> {
   
   restorePlaybackPositionEnabled: boolean;
   loudnessNormalizationEnabled: boolean;
+  autoplayOnStartEnabled: boolean;
 
   /**
    * 获取当前进度（秒）
@@ -102,6 +103,7 @@ declare class OrpheusModule extends NativeModule<OrpheusEvents> {
   
   setRestorePlaybackPositionEnabled(enabled: boolean): void;
   setLoudnessNormalizationEnabled(enabled: boolean): void;
+  setAutoplayOnStartEnabled(enabled: boolean): void;
 
   play(): Promise<void>;
 

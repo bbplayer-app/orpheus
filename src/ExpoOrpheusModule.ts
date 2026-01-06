@@ -56,6 +56,8 @@ declare class OrpheusModule extends NativeModule<OrpheusEvents> {
   restorePlaybackPositionEnabled: boolean;
   loudnessNormalizationEnabled: boolean;
   autoplayOnStartEnabled: boolean;
+  isDesktopLyricsShown: boolean;
+  isDesktopLyricsLocked: boolean;
 
   /**
    * 获取当前进度（秒）
@@ -202,6 +204,13 @@ declare class OrpheusModule extends NativeModule<OrpheusEvents> {
    * 获取所有未完成的下载任务
    */
   getUncompletedDownloadTasks(): Promise<DownloadTask[]>;
+
+  checkOverlayPermission(): Promise<boolean>;
+  requestOverlayPermission(): Promise<void>;
+  showDesktopLyrics(): Promise<void>;
+  hideDesktopLyrics(): Promise<void>;
+  setDesktopLyrics(lyricsJson: string): Promise<void>;
+  setDesktopLyricsLocked(locked: boolean): Promise<void>;
 }
 
 export enum DownloadState {

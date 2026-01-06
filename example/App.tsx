@@ -12,8 +12,16 @@ import {
 } from 'react-native';
 // 假设这些类型都是从你的包里导出的
 import { Orpheus, PlaybackState, RepeatMode, Track, TransitionReason, useCurrentTrack } from '@roitium/expo-orpheus';
+import LYRICS_DATA from '../bilibili--BV1DL4y1V7xH--584235509.json';
 
 const TEST_TRACKS: Track[] = [
+  {
+    id: 'bilibili--BV1DL4y1V7xH--584235509',
+    url: 'orpheus://bilibili?bvid=BV1DL4y1V7xH&cid=584235509',
+    title: 'Superstar (Desktop Lyrics Demo)',
+    artist: 'えびかれー伯爵',
+    artwork: 'https://i0.hdslb.com/bfs/archive/8f2c8d87a9f7e8e8e8e8e8e8e8e8e8e8e8e8e8e8.jpg',
+  },
   {
     id: 'test_bili_fake',
     url: 'orpheus://bilibili?bvid=BV1WPS4BuEEb',
@@ -81,6 +89,9 @@ export default function OrpheusTestScreen() {
     // 对应新定义的 onTrackStarted
     const subTrackStart = Orpheus.addListener('onTrackStarted', async (event) => {
       console.log('Track Started:', event);
+      if (event.trackId === 'bilibili--BV1DL4y1V7xH--584235509') {
+        await Orpheus.setDesktopLyrics(JSON.stringify(LYRICS_DATA));
+      }
       // setLastEventLog(`Track Started: ${event.trackId} (Reason: ${TransitionReason[event.reason]})`);
       // 切歌了，重新拉取当前歌曲信息
       console.log(`Track Started: ${event.trackId} (Reason: ${TransitionReason[event.reason]})`);
@@ -405,6 +416,29 @@ export default function OrpheusTestScreen() {
              <Button title="Remove All DL" onPress={() => {
                Orpheus.removeAllDownloads();
              }} danger />
+          </View>
+
+          <Text style={[styles.sectionTitle, { marginTop: 15 }]}>Desktop Lyrics API</Text>
+          <View style={styles.grid}>
+             <Button title="Request Overlay Permission" onPress={async () => {
+                await Orpheus.requestOverlayPermission();
+             }} />
+             <Button title="Check Overlay Permission" onPress={async () => {
+                const has = await Orpheus.checkOverlayPermission();
+                Alert.alert('Overlay Permission', has ? 'Granted' : 'Denied');
+             }} />
+             <Button title="Show Desktop Lyrics" onPress={async () => {
+                await Orpheus.showDesktopLyrics();
+             }} primary />
+             <Button title="Hide Desktop Lyrics" onPress={async () => {
+                await Orpheus.hideDesktopLyrics();
+             }} danger />
+             <Button title="Lock Desktop Lyrics" onPress={async () => {
+                await Orpheus.setDesktopLyricsLocked(true);
+             }} />
+             <Button title="Unlock Desktop Lyrics" onPress={async () => {
+                await Orpheus.setDesktopLyricsLocked(false);
+             }} />
           </View>
         </View>
 

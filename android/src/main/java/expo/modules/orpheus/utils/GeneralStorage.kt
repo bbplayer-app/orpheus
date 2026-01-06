@@ -21,6 +21,8 @@ object GeneralStorage {
     private const val KEY_SAVED_REPEAT_MODE = "saved_repeat_mode"
     private const val KEY_SAVED_SHUFFLE_MODE = "saved_shuffle_mode"
     private const val KEY_AUTOPLAY_ON_START_ENABLED = "config_autoplay_on_start_enabled"
+    private const val KEY_DESKTOP_LYRICS_SHOWN = "state_desktop_lyrics_shown"
+    private const val KEY_DESKTOP_LYRICS_LOCKED = "state_desktop_lyrics_locked"
 
 
     @Synchronized
@@ -122,4 +124,10 @@ object GeneralStorage {
     fun getSavedPosition() = kv?.decodeLong(KEY_SAVED_POSITION, 0L) ?: 0L
     fun getRepeatMode() = kv?.decodeInt(KEY_SAVED_REPEAT_MODE, 0) ?: 0
     fun getShuffleMode() = kv?.decodeBool(KEY_SAVED_SHUFFLE_MODE, false) ?: false
+
+    fun isDesktopLyricsShown() = kv?.decodeBool(KEY_DESKTOP_LYRICS_SHOWN, false) ?: false
+    fun setDesktopLyricsShown(shown: Boolean) = safeKv.encode(KEY_DESKTOP_LYRICS_SHOWN, shown)
+
+    fun isDesktopLyricsLocked() = kv?.decodeBool(KEY_DESKTOP_LYRICS_LOCKED, false) ?: false
+    fun setDesktopLyricsLocked(locked: Boolean) = safeKv.encode(KEY_DESKTOP_LYRICS_LOCKED, locked)
 }

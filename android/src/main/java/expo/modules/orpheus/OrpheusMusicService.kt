@@ -1,5 +1,6 @@
 package expo.modules.orpheus
 
+import android.R
 import android.app.PendingIntent
 import android.content.Intent
 import android.util.Log
@@ -36,6 +37,19 @@ class OrpheusMusicService : MediaLibraryService() {
     private var sleepTimerManager: SleepTimeController? = null
     private var volumeFadeJob: Job? = null
     private var scope = MainScope()
+
+    lateinit var floatingLyricsManager: FloatingLyricsManager
+    private val serviceHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val lyricsUpdateRunnable = object : Runnable {
+        override fun run() {
+            player?.let {
+                if (it.isPlaying) {
+                    floatingLyricsManager.updateTime(it.currentPosition / 1000.0)
+                }
+            }
+            serviceHandler.postDelayed(this, 200)
+        }
+    }
 
     companion object {
         var instance: OrpheusMusicService? = null
@@ -84,6 +98,11 @@ class OrpheusMusicService : MediaLibraryService() {
             )
             .build()
 
+        floatingLyricsManager = FloatingLyricsManager(this, player)
+        if (GeneralStorage.isDesktopLyricsShown()) {
+            serviceHandler.post { floatingLyricsManager.show() }
+        }
+
         setupListeners()
 
         var launchIntent = packageManager.getLaunchIntentForPackage(packageName)
@@ -124,6 +143,8 @@ class OrpheusMusicService : MediaLibraryService() {
     }
 
     override fun onDestroy() {
+        serviceHandler.removeCallbacks(lyricsUpdateRunnable)
+        floatingLyricsManager.hide()
         scope.cancel()
         instance = null
 
@@ -159,13 +180,10 @@ class OrpheusMusicService : MediaLibraryService() {
                 .build()
         }
 
-        /**
-         * 修复 UnsupportedOperationException 的关键！
-         * 当系统尝试恢复播放（比如从“最近播放”卡片点击）时触发。
-         */
         override fun onPlaybackResumption(
             mediaSession: MediaSession,
-            controller: MediaSession.ControllerInfo
+            controller: MediaSession.ControllerInfo,
+            isPlayback: Boolean
         ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
             return Futures.immediateFuture(
                 MediaSession.MediaItemsWithStartPosition(
@@ -207,11 +225,21 @@ class OrpheusMusicService : MediaLibraryService() {
 
     private fun setupListeners() {
         player?.addListener(object : Player.Listener {
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                if (isPlaying) {
+                    serviceHandler.removeCallbacks(lyricsUpdateRunnable)
+                    serviceHandler.post(lyricsUpdateRunnable)
+                } else {
+                    serviceHandler.removeCallbacks(lyricsUpdateRunnable)
+                }
+            }
+
             @OptIn(UnstableApi::class)
             override fun onMediaItemTransition(
                 mediaItem: androidx.media3.common.MediaItem?,
                 reason: Int
             ) {
+                floatingLyricsManager.setLyrics(emptyList())
                 saveCurrentQueue()
                 val uri = mediaItem?.localConfiguration?.uri?.toString() ?: return
 

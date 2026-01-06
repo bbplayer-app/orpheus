@@ -230,6 +230,15 @@ class ExpoOrpheusModule : Module() {
             GeneralStorage.isAutoplayOnStartEnabled()
         }
 
+        Constant("isDesktopLyricsShown") {
+            GeneralStorage.isDesktopLyricsShown()
+        }
+
+        Constant("isDesktopLyricsLocked") {
+            GeneralStorage.isDesktopLyricsLocked()
+        }
+
+
         Function("setAutoplayOnStartEnabled") { enabled: Boolean ->
             GeneralStorage.setAutoplayOnStartEnabled(enabled)
         }
@@ -592,6 +601,44 @@ class ExpoOrpheusModule : Module() {
             }
             return@AsyncFunction result
         }
+
+        AsyncFunction("checkOverlayPermission") {
+            val context = appContext.reactContext ?: return@AsyncFunction false
+            android.provider.Settings.canDrawOverlays(context)
+        }.runOnQueue(Queues.MAIN)
+
+        AsyncFunction("requestOverlayPermission") {
+            val context = appContext.reactContext ?: return@AsyncFunction false
+            if (!android.provider.Settings.canDrawOverlays(context)) {
+                val intent = android.content.Intent(
+                    android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    "package:${context.packageName}".toUri()
+                )
+                intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                context.startActivity(intent)
+            }
+        }.runOnQueue(Queues.MAIN)
+
+        AsyncFunction("showDesktopLyrics") {
+            OrpheusMusicService.instance?.floatingLyricsManager?.show()
+        }.runOnQueue(Queues.MAIN)
+
+        AsyncFunction("hideDesktopLyrics") {
+            OrpheusMusicService.instance?.floatingLyricsManager?.hide()
+        }.runOnQueue(Queues.MAIN)
+
+        AsyncFunction("setDesktopLyrics") { lyricsJson: String ->
+            try {
+                val data = gson.fromJson(lyricsJson, expo.modules.orpheus.models.LyricsData::class.java)
+                OrpheusMusicService.instance?.floatingLyricsManager?.setLyrics(data.lyrics, data.offset)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }.runOnQueue(Queues.MAIN)
+
+        AsyncFunction("setDesktopLyricsLocked") { locked: Boolean ->
+            OrpheusMusicService.instance?.floatingLyricsManager?.setLocked(locked)
+        }.runOnQueue(Queues.MAIN)
     }
 
     private fun getDownloadMap(download: Download): Map<String, Any> {

@@ -1,8 +1,8 @@
 package expo.modules.orpheus
 
-import android.R
 import android.app.PendingIntent
 import android.content.Intent
+import android.os.Bundle
 import android.util.Log
 import androidx.annotation.OptIn
 import androidx.core.net.toUri
@@ -13,10 +13,16 @@ import androidx.media3.common.Timeline
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.session.CommandButton
+import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
+import androidx.media3.session.SessionCommand
+import androidx.media3.session.SessionResult
+import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
+import expo.modules.orpheus.R
 import expo.modules.orpheus.utils.DownloadUtil
 import expo.modules.orpheus.utils.SleepTimeController
 import expo.modules.orpheus.utils.GeneralStorage
@@ -79,6 +85,77 @@ class OrpheusMusicService : MediaLibraryService() {
 
         GeneralStorage.initialize(this)
         LoudnessStorage.initialize(this)
+
+        setMediaNotificationProvider(object : DefaultMediaNotificationProvider(this) {
+            override fun getMediaButtons(
+                session: MediaSession,
+                playerCommands: Player.Commands,
+                customLayout: ImmutableList<CommandButton>,
+                showPlaying: Boolean
+            ): ImmutableList<CommandButton> {
+                val builder = ImmutableList.builder<CommandButton>()
+                val player = session.player
+
+                // Previous
+                builder.add(
+                    CommandButton.Builder(CommandButton.ICON_UNDEFINED)
+                        .setPlayerCommand(Player.COMMAND_SEEK_TO_PREVIOUS)
+                        .setCustomIconResId(R.drawable.outline_skip_previous_24)
+                        .setDisplayName("Previous")
+                        .setEnabled(playerCommands.contains(Player.COMMAND_SEEK_TO_PREVIOUS))
+                        .build()
+                )
+
+                // Play/Pause
+                if (showPlaying) {
+                    builder.add(
+                        CommandButton.Builder(CommandButton.ICON_UNDEFINED)
+                            .setPlayerCommand(Player.COMMAND_PLAY_PAUSE)
+                            .setCustomIconResId(R.drawable.outline_pause_24)
+                            .setDisplayName("Pause")
+                            .setEnabled(playerCommands.contains(Player.COMMAND_PLAY_PAUSE))
+                            .build()
+                    )
+                } else {
+                    builder.add(
+                        CommandButton.Builder(CommandButton.ICON_UNDEFINED)
+                            .setPlayerCommand(Player.COMMAND_PLAY_PAUSE)
+                            .setCustomIconResId(R.drawable.outline_play_arrow_24)
+                            .setDisplayName("Play")
+                            .setEnabled(playerCommands.contains(Player.COMMAND_PLAY_PAUSE))
+                            .build()
+                    )
+                }
+
+                // Next
+                builder.add(
+                    CommandButton.Builder(CommandButton.ICON_UNDEFINED)
+                        .setPlayerCommand(Player.COMMAND_SEEK_TO_NEXT)
+                        .setCustomIconResId(R.drawable.outline_skip_next_24)
+                        .setDisplayName("Next")
+                        .setEnabled(playerCommands.contains(Player.COMMAND_SEEK_TO_NEXT))
+                        .build()
+                )
+
+                // Repeat Mode Toggle
+                val repeatIcon = when (player.repeatMode) {
+                    Player.REPEAT_MODE_ONE -> R.drawable.outline_repeat_one_24
+                    Player.REPEAT_MODE_ALL -> R.drawable.outline_repeat_24
+                    else -> R.drawable.outline_repeat_off_24
+                }
+
+                builder.add(
+                    CommandButton.Builder(CommandButton.ICON_UNDEFINED)
+                        .setSessionCommand(SessionCommand(CustomCommands.CMD_TOGGLE_REPEAT_MODE, Bundle.EMPTY))
+                        .setCustomIconResId(repeatIcon)
+                        .setDisplayName("Repeat Mode")
+                        .setEnabled(true)
+                        .build()
+                )
+
+                return builder.build()
+            }
+        })
 
 
         val dataSourceFactory = DownloadUtil.getPlayerDataSourceFactory(this)
@@ -176,8 +253,34 @@ class OrpheusMusicService : MediaLibraryService() {
             session: MediaSession,
             controller: MediaSession.ControllerInfo
         ): MediaSession.ConnectionResult {
-            return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
+            val sessionCommands = MediaSession.ConnectionResult.DEFAULT_SESSION_COMMANDS.buildUpon()
+                .add(SessionCommand(CustomCommands.CMD_TOGGLE_REPEAT_MODE, Bundle.EMPTY))
                 .build()
+
+            return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
+                .setAvailableSessionCommands(sessionCommands)
+                .build()
+        }
+
+        @OptIn(UnstableApi::class)
+        override fun onCustomCommand(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo,
+            customCommand: SessionCommand,
+            args: Bundle
+        ): ListenableFuture<SessionResult> {
+            if (customCommand.customAction == CustomCommands.CMD_TOGGLE_REPEAT_MODE) {
+                val player = session.player
+                val newMode = when (player.repeatMode) {
+                    Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL
+                    Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE
+                    Player.REPEAT_MODE_ONE -> Player.REPEAT_MODE_OFF
+                    else -> Player.REPEAT_MODE_OFF
+                }
+                player.repeatMode = newMode
+                return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+            }
+            return super.onCustomCommand(session, controller, customCommand, args)
         }
 
         override fun onPlaybackResumption(

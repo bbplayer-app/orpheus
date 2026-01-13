@@ -1,6 +1,6 @@
 {
   "name": "@roitium/expo-orpheus",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "description": "A player for bbplayer",
   "main": "build/index.js",
   "types": "build/index.d.ts",

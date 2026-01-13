@@ -220,6 +220,26 @@ class OrpheusMusicService : MediaLibraryService() {
 
             player.playWhenReady = GeneralStorage.isAutoplayOnStartEnabled()
             player.prepare()
+
+            // 软件冷启动时，恢复的歌曲并不会触发 onMediaTransition 事件，我们需要手动补发一个
+            if (player.currentMediaItem != null) {
+                sendTrackStartEvent(player.currentMediaItem, Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED)
+            }
+        }
+    }
+
+    @OptIn(UnstableApi::class)
+    private fun sendTrackStartEvent(mediaItem: androidx.media3.common.MediaItem?, reason: Int) {
+        if (mediaItem == null) return
+        
+        try {
+            val intent = Intent(this, OrpheusHeadlessTaskService::class.java)
+            intent.putExtra("eventName", "onTrackStarted")
+            intent.putExtra("trackId", mediaItem.mediaId)
+            intent.putExtra("reason", reason)
+            startService(intent)
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
     }
 
@@ -239,6 +259,8 @@ class OrpheusMusicService : MediaLibraryService() {
                 mediaItem: androidx.media3.common.MediaItem?,
                 reason: Int
             ) {
+                sendTrackStartEvent(mediaItem, reason)
+
                 floatingLyricsManager.setLyrics(emptyList())
                 saveCurrentQueue()
                 val uri = mediaItem?.localConfiguration?.uri?.toString() ?: return

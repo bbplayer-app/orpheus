@@ -30,6 +30,12 @@ Orpheus 集成了 Media3 的 DownloadManager，抛弃了原先 BBPlayer 中繁�
 相信聪明的你去看一下公开方法名就知道怎么使用了！
 （需要注意的是，在切歌时，会自动清空当前的歌词）
 
+## 注意事项
+
+该库一些修改比较随意，我怕后续我自己都忘了，所以在这里进行一下记录。
+
+1. `onTrackStarted` 事件在 v0.9.0 版本后不再存在。需要使用 `registerOrpheusHeadlessTask` 注册事件并自行判断事件是否为 `onTrackStarted`
+
 ## 使用
 
 虽然该包是公开的，但仍然主要供 BBPlayer 内部使用。可能不会有完整的文档覆盖。我们欢迎你 fork 后自行修改使用。

@@ -89,9 +89,9 @@ export default function OrpheusTestScreen() {
     // 对应新定义的 onTrackStarted
     const subTrackStart = Orpheus.addListener('onTrackStarted', async (event) => {
       console.log('Track Started:', event);
-      if (event.trackId === 'bilibili--BV1DL4y1V7xH--584235509') {
-        await Orpheus.setDesktopLyrics(JSON.stringify(LYRICS_DATA));
-      }
+      // if (event.trackId === 'bilibili--BV1DL4y1V7xH--584235509') {
+      //   await Orpheus.setDesktopLyrics(JSON.stringify(LYRICS_DATA));
+      // }
       // setLastEventLog(`Track Started: ${event.trackId} (Reason: ${TransitionReason[event.reason]})`);
       // 切歌了，重新拉取当前歌曲信息
       console.log(`Track Started: ${event.trackId} (Reason: ${TransitionReason[event.reason]})`);

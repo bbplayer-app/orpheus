@@ -8,11 +8,9 @@ import {
   ScrollView,
   SafeAreaView,
   Alert,
-  Dimensions,
 } from 'react-native';
 // 假设这些类型都是从你的包里导出的
 import { Orpheus, PlaybackState, RepeatMode, Track, TransitionReason, useCurrentTrack } from '@roitium/expo-orpheus';
-import LYRICS_DATA from '../bilibili--BV1DL4y1V7xH--584235509.json';
 
 const TEST_TRACKS: Track[] = [
   {
@@ -64,9 +62,11 @@ export default function OrpheusTestScreen() {
   const [restorePlaybackPositionEnabled, setRestorePlaybackPositionEnabled] = useState(false);
   const [downloadTasks, setDownloadTasks] = useState<any[]>([]);
   const [autoplay, setAutoplay] = useState(false);
+  const [desktopLyricsShown, setDesktopLyricsShown] = useState(false);
+  const [desktopLyricsLocked, setDesktopLyricsLocked] = useState(false);
   
   // 调试信息
-  const [lastEventLog, setLastEventLog] = useState<string>('Ready');
+  const [lastEventLog, setLastEventLog] = useState<string>('就绪');
 
   useEffect(() => {
     setRestorePlaybackPositionEnabled(Orpheus.restorePlaybackPositionEnabled)
@@ -82,25 +82,20 @@ export default function OrpheusTestScreen() {
     // 注意：事件名称必须严格对应 OrpheusEvents 类型中的定义
 
     const subState = Orpheus.addListener('onPlaybackStateChanged', (event) => {
-      console.log('State Changed:', event.state);
+      console.log('状态改变:', event.state);
       setPlaybackState(event.state);
     });
 
     // 对应新定义的 onTrackStarted
     const subTrackStart = Orpheus.addListener('onTrackStarted', async (event) => {
-      console.log('Track Started:', event);
-      // if (event.trackId === 'bilibili--BV1DL4y1V7xH--584235509') {
-      //   await Orpheus.setDesktopLyrics(JSON.stringify(LYRICS_DATA));
-      // }
-      // setLastEventLog(`Track Started: ${event.trackId} (Reason: ${TransitionReason[event.reason]})`);
-      // 切歌了，重新拉取当前歌曲信息
-      console.log(`Track Started: ${event.trackId} (Reason: ${TransitionReason[event.reason]})`);
+      console.log('歌曲开始:', event);
+      console.log(`歌曲开始: ${event.trackId} (原因: ${TransitionReason[event.reason]})`);
     });
 
     // 对应新定义的 onTrackFinished (调试用)
     const subTrackFinish = Orpheus.addListener('onTrackFinished', (event) => {
-      console.log('Track Finished:', event);
-      setLastEventLog(`Track Finished: ${event.trackId}`);
+      console.log('歌曲结束:', event);
+      setLastEventLog(`歌曲结束: ${event.trackId}`);
     });
 
     const subPlaying = Orpheus.addListener('onIsPlayingChanged', (event) => {
@@ -116,13 +111,13 @@ export default function OrpheusTestScreen() {
     });
 
     const subError = Orpheus.addListener('onPlayerError', (event) => {
-      Alert.alert('播放器报错', `Code: ${event.code}\nMessage: ${event.message}`);
-      setLastEventLog(`Error: ${event.code}`);
+      Alert.alert('播放器报错', `代码: ${event.code}\n信息: ${event.message}`);
+      setLastEventLog(`错误: ${event.code}`);
     });
 
     // 监听下载进度
     const subDownload = Orpheus.addListener('onDownloadUpdated', (task) => {
-      console.log(`Download Update [${task.id}]: ${task.percentDownloaded.toFixed(1)}% (State: ${task.state})`);
+      console.log(`下载更新 [${task.id}]: ${task.percentDownloaded.toFixed(1)}% (状态: ${task.state})`);
       // 简单更新一下日志，或者你可以把 task 存到 state 里展示
       // setLastEventLog(`DL [${task.id}]: ${task.percentDownloaded.toFixed(1)}%`);
     });
@@ -153,11 +148,25 @@ export default function OrpheusTestScreen() {
       const repeat = await Orpheus.getRepeatMode();
       setRepeatMode(repeat);
 
+      await syncDesktopLyricsStatus();
+
     } catch (e: any) {
-      console.error("Sync State Error:", e);
-      setLastEventLog(`Sync Error: ${e.message}`);
+      console.error("同步状态错误:", e);
+      setLastEventLog(`同步错误: ${e.message}`);
     }
   };
+
+  const syncDesktopLyricsStatus = async () => {
+    try {
+      // 使用属性直接获取状态
+      const shown = Orpheus.isDesktopLyricsShown;
+      setDesktopLyricsShown(shown);
+      const locked = Orpheus.isDesktopLyricsLocked;
+      setDesktopLyricsLocked(locked);
+    } catch (e: any) {
+      console.error("同步歌词状态错误:", e);
+    }
+  }
 
   // --- 交互处理 ---
 
@@ -178,8 +187,8 @@ export default function OrpheusTestScreen() {
       // API 变更：add -> addToEnd
       // 第二个参数 startFromId，这里传 undefined 表示不立即切歌，或者传 TEST_TRACKS[0].id 立即播放
       await Orpheus.addToEnd(TEST_TRACKS, undefined, false);
-      setLastEventLog('Tracks Added to End');
-      Alert.alert('Success', 'Tracks added to queue');
+      setLastEventLog('歌曲已添加到队列末尾');
+      Alert.alert('成功', '歌曲已添加到队列');
     } catch (e: any) {
       Alert.alert("添加失败", e.message);
     }
@@ -189,7 +198,7 @@ export default function OrpheusTestScreen() {
     try {
       // 测试 addToEnd 的 clearQueue 参数
       await Orpheus.addToEnd(TEST_TRACKS, TEST_TRACKS[0].id, true);
-      setLastEventLog('Queue Cleared & New Tracks Playing');
+      setLastEventLog('队列已清空并播放新歌曲');
     } catch (e: any) {
       Alert.alert("操作失败", e.message);
     }
@@ -199,12 +208,12 @@ export default function OrpheusTestScreen() {
     try {
       const track = await Orpheus.getIndexTrack(0);
       if (track) {
-        Alert.alert('Get Index 0 Success', `Title: ${track.title}\nID: ${track.id}`);
+        Alert.alert('获取索引 0 成功', `标题: ${track.title}\nID: ${track.id}`);
       } else {
-        Alert.alert('Get Index 0', 'Returned null (Queue might be empty)');
+        Alert.alert('获取索引 0', '返回空 (队列可能为空)');
       }
     } catch (e: any) {
-      Alert.alert('Error', e.message);
+      Alert.alert('错误', e.message);
     }
   };
 
@@ -226,12 +235,12 @@ export default function OrpheusTestScreen() {
       const idx = await Orpheus.getCurrentIndex();
       if (idx !== -1) {
         await Orpheus.removeTrack(idx);
-        setLastEventLog(`Removed track at index ${idx}`);
+        setLastEventLog(`移除索引 ${idx} 的歌曲`);
       } else {
         Alert.alert("无法移除", "当前没有播放索引");
       }
     } catch (e: any) {
-      Alert.alert("Error", e.message);
+      Alert.alert("错误", e.message);
     }
   }
 
@@ -254,7 +263,7 @@ export default function OrpheusTestScreen() {
         
         {/* 1. 顶部状态栏 */}
         <View style={styles.header}>
-          <Text style={styles.headerTitle}>Orpheus Debugger</Text>
+          <Text style={styles.headerTitle}>Orpheus 调试器</Text>
           <Text style={styles.stateTag}>{PlaybackState[playbackState]}</Text>
         </View>
 
@@ -264,15 +273,15 @@ export default function OrpheusTestScreen() {
             <Image source={{ uri: currentTrack.artwork }} style={styles.artwork} />
           ) : (
             <View style={[styles.artwork, styles.artworkPlaceholder]}>
-              <Text style={{ color: '#666' }}>No Artwork</Text>
+              <Text style={{ color: '#666' }}>暂无封面</Text>
             </View>
           )}
           
           <Text style={styles.title} numberOfLines={1}>
-            {currentTrack?.title || 'No Track Playing'}
+            {currentTrack?.title || '未播放'}
           </Text>
           <Text style={styles.artist} numberOfLines={1}>
-            {currentTrack?.artist || 'Orpheus Player'}
+            {currentTrack?.artist || 'Orpheus 播放器'}
           </Text>
           <Text style={styles.trackId}>ID: {currentTrack?.id || '-'}</Text>
           <Text style={styles.debugText}>{lastEventLog}</Text>
@@ -319,12 +328,12 @@ export default function OrpheusTestScreen() {
         {/* 5. 模式控制 */}
         <View style={styles.modeRow}>
           <Button 
-            title={`Repeat: ${RepeatMode[repeatMode]}`} 
+            title={`重复: ${RepeatMode[repeatMode]}`} 
             onPress={toggleRepeat} 
             small 
           />
           <Button 
-            title={`Shuffle: ${shuffleMode ? 'ON' : 'OFF'}`} 
+            title={`随机: ${shuffleMode ? '开' : '关'}`} 
             onPress={toggleShuffle} 
             small 
             active={shuffleMode}
@@ -333,111 +342,121 @@ export default function OrpheusTestScreen() {
 
         {/* 6. 功能测试区 */}
         <View style={styles.actionsContainer}>
-          <Text style={styles.sectionTitle}>Queue API</Text>
+          <Text style={styles.sectionTitle}>队列 API</Text>
           <View style={styles.grid}>
-            <Button title="Add to End" onPress={handleAddTracks} />
-            <Button title="Clear & Play New" onPress={handleClearAndPlay} primary />
-            <Button title="Clear Queue" onPress={() => Orpheus.clear()} danger />
-            <Button title="Remove Current" onPress={handleRemoveCurrent} danger />
+            <Button title="添加到末尾" onPress={handleAddTracks} />
+            <Button title="清空并播放" onPress={handleClearAndPlay} primary />
+            <Button title="清空队列" onPress={() => Orpheus.clear()} danger />
+            <Button title="移除当前" onPress={handleRemoveCurrent} danger />
           </View>
 
-          <Text style={[styles.sectionTitle, { marginTop: 15 }]}>Info & Seek</Text>
+          <Text style={[styles.sectionTitle, { marginTop: 15 }]}>信息 & 跳转</Text>
           <View style={styles.grid}>
-            <Button title="Log Queue" onPress={async () => {
+            <Button title="打印队列" onPress={async () => {
                const q = await Orpheus.getQueue();
-               console.log('Current Queue:', q);
-               setLastEventLog(`Queue Length: ${q.length}`);
+               console.log('当前队列:', q);
+               setLastEventLog(`队列长度: ${q.length}`);
             }} />
-            <Button title="Get Track [0]" onPress={handleTestIndexTrack} />
+            <Button title="获取歌曲 [0]" onPress={handleTestIndexTrack} />
             
-            <Button title="Seek +15s" onPress={() => {
+            <Button title="快进 +15s" onPress={() => {
               Orpheus.seekTo(progress.position + 15);
             }} />
-            <Button title="Seek to 0s" onPress={() => {
+            <Button title="跳转到 0s" onPress={() => {
               Orpheus.seekTo(0);
             }} />
 
-            <Button title={(restorePlaybackPositionEnabled ? 'Disabled' : 'Enabled') + "Restore Playback Position"} onPress={() => {
+            <Button title={(restorePlaybackPositionEnabled ? '禁用' : '启用') + " 记忆播放"} onPress={() => {
               Orpheus.setRestorePlaybackPositionEnabled(true);
               setRestorePlaybackPositionEnabled(Orpheus.restorePlaybackPositionEnabled)
             }} />
 
-            <Button title={(autoplay ? 'Disabled' : 'Enabled') + "Autoplay on start"} onPress={() => {
+            <Button title={(autoplay ? '禁用' : '启用') + " 启动自动播放"} onPress={() => {
               Orpheus.setAutoplayOnStartEnabled(true);
               setRestorePlaybackPositionEnabled(Orpheus.restorePlaybackPositionEnabled)
             }} />
 
-            <Button title="Set Sleep Timer" onPress={() => {
+            <Button title="设置睡眠定时 (10s)" onPress={() => {
               Orpheus.setSleepTimer(10000);
             }} />
-            <Button title="Get Sleep Timer End Time" onPress={async () => {
+            <Button title="获取睡眠剩余时间" onPress={async () => {
               try{
               const endTime = await Orpheus.getSleepTimerEndTime();
               if (endTime) {
-                Alert.alert('Sleep Timer End Time', `${endTime / 1000}s`);
+                Alert.alert('睡眠结束时间', `${endTime / 1000}s`);
               } else {
-                Alert.alert('Sleep Timer End Time', 'Not Set');
+                Alert.alert('睡眠结束时间', '未设置');
               }
             }catch(e){
-              Alert.alert('Sleep Timer End Time', e.message);
+              Alert.alert('睡眠结束时间', e.message);
               console.log(e)
             }
             }} />
-            <Button title="Cancel Sleep Timer" onPress={() => {
+            <Button title="取消睡眠定时" onPress={() => {
               Orpheus.cancelSleepTimer();
             }} />
           </View>
 
-          <Text style={[styles.sectionTitle, { marginTop: 15 }]}>Download API</Text>
+          <Text style={[styles.sectionTitle, { marginTop: 15 }]}>下载 API</Text>
           <View style={styles.grid}>
-             <Button title="Download [0]" onPress={() => {
+             <Button title="下载 [0]" onPress={() => {
                Orpheus.downloadTrack(TEST_TRACKS[0]);
              }} />
-             <Button title="Multi Download" onPress={() => {
+             <Button title="批量下载" onPress={() => {
                 Orpheus.multiDownload(TEST_TRACKS.slice(1));
              }} />
-             <Button title="Get All Downloads" onPress={async () => {
+             <Button title="获取所有下载" onPress={async () => {
                const downloads = await Orpheus.getDownloads();
-               console.log('All Downloads:', downloads);
-               setLastEventLog(`Downloads count: ${downloads.length}`);
+               console.log('所有下载:', downloads);
+               setLastEventLog(`下载数量: ${downloads.length}`);
              }} />
-             <Button title="Get IDs Status" onPress={async () => {
+             <Button title="获取 ID 状态" onPress={async () => {
                const ids = TEST_TRACKS.map(t => t.id);
                try{
                const statusMap = await Orpheus.getDownloadStatusByIds(ids);
-                              console.log('Status Map:', statusMap);
-               Alert.alert('Status Map', JSON.stringify(statusMap, null, 2));
+                              console.log('状态映射:', statusMap);
+               Alert.alert('状态映射', JSON.stringify(statusMap, null, 2));
                }catch(e){
-                 Alert.alert('Get IDs Status', e.message);
+                 Alert.alert('获取 ID 状态失败', e.message);
                  console.log(e)
                  return
                }
              }} />
-             <Button title="Remove All DL" onPress={() => {
+             <Button title="删除所有下载" onPress={() => {
                Orpheus.removeAllDownloads();
              }} danger />
           </View>
 
-          <Text style={[styles.sectionTitle, { marginTop: 15 }]}>Desktop Lyrics API</Text>
+          <Text style={[styles.sectionTitle, { marginTop: 15 }]}>桌面歌词 API</Text>
+          <View style={{marginBottom: 10}}>
+             <Text style={{color: '#aaa', fontSize: 12}}>状态: {desktopLyricsShown ? '显示' : '隐藏'} / {desktopLyricsLocked ? '锁定' : '未锁定'}</Text>
+          </View>
           <View style={styles.grid}>
-             <Button title="Request Overlay Permission" onPress={async () => {
+             <Button title="请求悬浮窗权限" onPress={async () => {
                 await Orpheus.requestOverlayPermission();
              }} />
-             <Button title="Check Overlay Permission" onPress={async () => {
+             <Button title="检查悬浮窗权限" onPress={async () => {
                 const has = await Orpheus.checkOverlayPermission();
-                Alert.alert('Overlay Permission', has ? 'Granted' : 'Denied');
+                Alert.alert('悬浮窗权限', has ? '已授权' : '未授权');
              }} />
-             <Button title="Show Desktop Lyrics" onPress={async () => {
+             <Button title="显示桌面歌词" onPress={async () => {
                 await Orpheus.showDesktopLyrics();
+                await syncDesktopLyricsStatus();
              }} primary />
-             <Button title="Hide Desktop Lyrics" onPress={async () => {
+             <Button title="隐藏桌面歌词" onPress={async () => {
                 await Orpheus.hideDesktopLyrics();
+                await syncDesktopLyricsStatus();
              }} danger />
-             <Button title="Lock Desktop Lyrics" onPress={async () => {
+             <Button title="锁定桌面歌词" onPress={async () => {
                 await Orpheus.setDesktopLyricsLocked(true);
+                await syncDesktopLyricsStatus();
              }} />
-             <Button title="Unlock Desktop Lyrics" onPress={async () => {
+             <Button title="解锁桌面歌词" onPress={async () => {
                 await Orpheus.setDesktopLyricsLocked(false);
+                await syncDesktopLyricsStatus();
+             }} />
+             <Button title="刷新状态" onPress={async () => {
+                await syncDesktopLyricsStatus();
              }} />
           </View>
         </View>

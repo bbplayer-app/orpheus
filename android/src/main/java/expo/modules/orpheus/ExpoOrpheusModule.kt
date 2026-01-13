@@ -218,41 +218,32 @@ class ExpoOrpheusModule : Module() {
             Log.d("Orpheus", "Destroy media controller")
         }
 
-        Constant("restorePlaybackPositionEnabled") {
-            GeneralStorage.isRestoreEnabled()
-        }
+        Property("restorePlaybackPositionEnabled")
+            .get { GeneralStorage.isRestoreEnabled() }
+            .set { enabled: Boolean -> GeneralStorage.setRestoreEnabled(enabled) }
 
-        Constant("loudnessNormalizationEnabled") {
-            GeneralStorage.isLoudnessNormalizationEnabled()
-        }
+        Property("loudnessNormalizationEnabled")
+            .get { GeneralStorage.isLoudnessNormalizationEnabled() }
+            .set { enabled: Boolean -> GeneralStorage.setLoudnessNormalizationEnabled(enabled) }
 
-        Constant("autoplayOnStartEnabled") {
-            GeneralStorage.isAutoplayOnStartEnabled()
-        }
+        Property("autoplayOnStartEnabled")
+            .get { GeneralStorage.isAutoplayOnStartEnabled() }
+            .set { enabled: Boolean -> GeneralStorage.setAutoplayOnStartEnabled(enabled) }
 
-        Constant("isDesktopLyricsShown") {
-            GeneralStorage.isDesktopLyricsShown()
-        }
+        Property("isDesktopLyricsShown")
+            .get { GeneralStorage.isDesktopLyricsShown() }
 
-        Constant("isDesktopLyricsLocked") {
-            GeneralStorage.isDesktopLyricsLocked()
-        }
+        Property("isDesktopLyricsLocked")
+            .get { GeneralStorage.isDesktopLyricsLocked() }
+            .set { locked: Boolean ->
+                mainHandler.post {
+                    OrpheusMusicService.instance?.floatingLyricsManager?.setLocked(locked)
+                }
+            }
 
-
-        Function("setAutoplayOnStartEnabled") { enabled: Boolean ->
-            GeneralStorage.setAutoplayOnStartEnabled(enabled)
-        }
 
         Function("setBilibiliCookie") { cookie: String ->
             OrpheusConfig.bilibiliCookie = cookie
-        }
-
-        Function("setLoudnessNormalizationEnabled") { enabled: Boolean ->
-            GeneralStorage.setLoudnessNormalizationEnabled(enabled)
-        }
-
-        Function("setRestorePlaybackPositionEnabled") { enabled: Boolean ->
-            GeneralStorage.setRestoreEnabled(enabled)
         }
 
         AsyncFunction("getPosition") {
@@ -634,10 +625,6 @@ class ExpoOrpheusModule : Module() {
             } catch (e: Exception) {
                 e.printStackTrace()
             }
-        }.runOnQueue(Queues.MAIN)
-
-        AsyncFunction("setDesktopLyricsLocked") { locked: Boolean ->
-            OrpheusMusicService.instance?.floatingLyricsManager?.setLocked(locked)
         }.runOnQueue(Queues.MAIN)
     }
 

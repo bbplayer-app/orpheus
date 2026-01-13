@@ -367,12 +367,12 @@ export default function OrpheusTestScreen() {
             }} />
 
             <Button title={(restorePlaybackPositionEnabled ? '禁用' : '启用') + " 记忆播放"} onPress={() => {
-              Orpheus.setRestorePlaybackPositionEnabled(true);
+              Orpheus.restorePlaybackPositionEnabled = true;
               setRestorePlaybackPositionEnabled(Orpheus.restorePlaybackPositionEnabled)
             }} />
 
             <Button title={(autoplay ? '禁用' : '启用') + " 启动自动播放"} onPress={() => {
-              Orpheus.setAutoplayOnStartEnabled(true);
+              Orpheus.autoplayOnStartEnabled = true;
               setRestorePlaybackPositionEnabled(Orpheus.restorePlaybackPositionEnabled)
             }} />
 
@@ -448,11 +448,11 @@ export default function OrpheusTestScreen() {
                 await syncDesktopLyricsStatus();
              }} danger />
              <Button title="锁定桌面歌词" onPress={async () => {
-                await Orpheus.setDesktopLyricsLocked(true);
+                Orpheus.isDesktopLyricsLocked = true;
                 await syncDesktopLyricsStatus();
              }} />
              <Button title="解锁桌面歌词" onPress={async () => {
-                await Orpheus.setDesktopLyricsLocked(false);
+                Orpheus.isDesktopLyricsLocked = false;
                 await syncDesktopLyricsStatus();
              }} />
              <Button title="刷新状态" onPress={async () => {

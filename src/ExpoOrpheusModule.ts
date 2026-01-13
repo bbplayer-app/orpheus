@@ -103,10 +103,6 @@ declare class OrpheusModule extends NativeModule<OrpheusEvents> {
 
   setBilibiliCookie(cookie: string): void;
   
-  setRestorePlaybackPositionEnabled(enabled: boolean): void;
-  setLoudnessNormalizationEnabled(enabled: boolean): void;
-  setAutoplayOnStartEnabled(enabled: boolean): void;
-
   play(): Promise<void>;
 
   pause(): Promise<void>;
@@ -210,7 +206,6 @@ declare class OrpheusModule extends NativeModule<OrpheusEvents> {
   showDesktopLyrics(): Promise<void>;
   hideDesktopLyrics(): Promise<void>;
   setDesktopLyrics(lyricsJson: string): Promise<void>;
-  setDesktopLyricsLocked(locked: boolean): Promise<void>;
 }
 
 export enum DownloadState {

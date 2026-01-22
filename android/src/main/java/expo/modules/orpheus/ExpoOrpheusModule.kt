@@ -164,6 +164,14 @@ class ExpoOrpheusModule : Module() {
             super.onShuffleModeEnabledChanged(shuffleModeEnabled)
             GeneralStorage.saveShuffleMode(shuffleModeEnabled)
         }
+
+        override fun onPlaybackParametersChanged(playbackParameters: androidx.media3.common.PlaybackParameters) {
+            sendEvent(
+                "onPlaybackSpeedChanged", mapOf(
+                    "speed" to playbackParameters.speed
+                )
+            )
+        }
     }
 
     @OptIn(UnstableApi::class)
@@ -177,7 +185,8 @@ class ExpoOrpheusModule : Module() {
             "onIsPlayingChanged",
             "onTrackFinished",
             "onTrackStarted",
-            "onDownloadUpdated"
+            "onDownloadUpdated",
+            "onPlaybackSpeedChanged"
         )
 
         OnCreate {
@@ -625,6 +634,16 @@ class ExpoOrpheusModule : Module() {
             } catch (e: Exception) {
                 e.printStackTrace()
             }
+        }.runOnQueue(Queues.MAIN)
+
+        AsyncFunction("setPlaybackSpeed") { speed: Float ->
+            checkPlayer()
+            player?.setPlaybackSpeed(speed)
+        }.runOnQueue(Queues.MAIN)
+
+        AsyncFunction("getPlaybackSpeed") {
+            checkPlayer()
+            player?.playbackParameters?.speed ?: 1.0f
         }.runOnQueue(Queues.MAIN)
     }
 

@@ -49,6 +49,7 @@ export type OrpheusEvents = {
   }): void;
   onIsPlayingChanged(event: { status: boolean }): void;
   onDownloadUpdated(event: DownloadTask): void;
+  onPlaybackSpeedChanged(event: { speed: number }): void;
 };
 
 declare class OrpheusModule extends NativeModule<OrpheusEvents> {
@@ -206,6 +207,9 @@ declare class OrpheusModule extends NativeModule<OrpheusEvents> {
   showDesktopLyrics(): Promise<void>;
   hideDesktopLyrics(): Promise<void>;
   setDesktopLyrics(lyricsJson: string): Promise<void>;
+  
+  setPlaybackSpeed(speed: number): Promise<void>;
+  getPlaybackSpeed(): Promise<number>;
 }
 
 export enum DownloadState {

@@ -58,6 +58,7 @@ export default function OrpheusTestScreen() {
   
   const [repeatMode, setRepeatMode] = useState<RepeatMode>(RepeatMode.OFF);
   const [shuffleMode, setShuffleMode] = useState(false);
+  const [playbackSpeed, setPlaybackSpeed] = useState(1.0);
   const {track: currentTrack} = useCurrentTrack()
   const [restorePlaybackPositionEnabled, setRestorePlaybackPositionEnabled] = useState(false);
   const [downloadTasks, setDownloadTasks] = useState<any[]>([]);
@@ -122,6 +123,11 @@ export default function OrpheusTestScreen() {
       // setLastEventLog(`DL [${task.id}]: ${task.percentDownloaded.toFixed(1)}%`);
     });
 
+    const subSpeed = Orpheus.addListener('onPlaybackSpeedChanged', (event) => {
+        console.log('播放速度改变:', event.speed);
+        setPlaybackSpeed(event.speed);
+    });
+
     return () => {
       subState.remove();
       // subTrackStart.remove();
@@ -130,6 +136,7 @@ export default function OrpheusTestScreen() {
       subProgress.remove();
       subError.remove();
       subDownload.remove();
+      subSpeed.remove();
     };
   }, []);
 
@@ -144,6 +151,9 @@ export default function OrpheusTestScreen() {
 
       const shuffle = await Orpheus.getShuffleMode();
       setShuffleMode(shuffle);
+
+      const speed = await Orpheus.getPlaybackSpeed();
+      setPlaybackSpeed(speed);
       
       const repeat = await Orpheus.getRepeatMode();
       setRepeatMode(repeat);
@@ -228,6 +238,29 @@ export default function OrpheusTestScreen() {
     const nextState = !shuffleMode;
     await Orpheus.setShuffleMode(nextState);
     setShuffleMode(nextState);
+  };
+
+  const toggleSpeed = async () => {
+    // 0.5 -> 1.0 -> 1.25 -> 1.5 -> 2.0 -> 0.5
+    // simple approximate matching to handle potential precision issues if needed, but strict is fine for now
+    const speeds = [0.5, 1.0, 1.25, 1.5, 2.0];
+    let nextSpeed = 1.0;
+    
+    // Find next speed
+    for (let i = 0; i < speeds.length; i++) {
+        if (playbackSpeed < speeds[i] - 0.01) { // Current speed is less than this slot (floating point tol)
+            nextSpeed = speeds[i];
+            break;
+        }
+    }
+    // If not found (current is max or unknown), wrap to first
+    if (playbackSpeed >= speeds[speeds.length - 1] - 0.01) {
+        nextSpeed = speeds[0];
+    }
+    
+    await Orpheus.setPlaybackSpeed(nextSpeed);
+    // Optimistic
+    setPlaybackSpeed(nextSpeed);
   };
 
   const handleRemoveCurrent = async () => {
@@ -337,6 +370,12 @@ export default function OrpheusTestScreen() {
             onPress={toggleShuffle} 
             small 
             active={shuffleMode}
+          />
+          <Button 
+            title={`倍速: ${playbackSpeed.toFixed(1)}x`} 
+            onPress={toggleSpeed} 
+            small 
+            active={playbackSpeed !== 1.0}
           />
         </View>
 

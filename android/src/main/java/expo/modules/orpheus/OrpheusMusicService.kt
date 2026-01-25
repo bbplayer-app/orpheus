@@ -173,6 +173,7 @@ class OrpheusMusicService : MediaLibraryService() {
                     .build(),
                 true
             )
+            .setHandleAudioBecomingNoisy(true)
             .build()
 
         floatingLyricsManager = FloatingLyricsManager(this, player)

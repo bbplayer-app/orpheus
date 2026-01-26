@@ -4,38 +4,18 @@
 
 这是一个为 BBPlayer 项目构建的高性能定制音频播放库。旨在替代 `react-native-track-player`，以提供与 Android Media3 (ExoPlayer) 更紧密的集成，并针对 Bilibili 音频流逻辑提供了原生层支持。
 
-## 与 B 站集成
+## 功能特性
 
-通过 `Orpheus.setBilibiliCookie()` 设置 cookie，稍后会自动用于音频流请求。（不设置也行，只是无法获取高码率的音频）
+- **Bilibili 集成**: 自动处理 Bilibili 音频流，支持高码率（需 Cookie）。
+- **双层缓存**: 包含独立的下载缓存和边下边播 LRU 缓存。
+- **Android Media3**: 基于最新的 Media3 和 ExoPlayer 架构。
+- **桌面歌词**: 支持系统级桌面歌词悬浮窗。
+- **ExoPlayer 扩展**: 支持 `ffmpeg` 扩展（如需要）。
 
-Orpheus 通过特殊的 uri 识别来自 bilibili 的资源，格式为 `orpheus://bilibili?bvid=xxx&cid=111&quality=30280&dolby=0&hires=0`，若不提供 cid 则默认请求第一个分 p。quality 参考 b 站 api。
+## 文档
 
-## 缓存
+详细的 API 文档和使用说明请参阅 [Wiki](docs/Home.md) 或直接查看 `docs/` 目录。
 
-Orpheus 内部有两层缓存：
+## 声明
 
-1. 用户手动下载的缓存
-2. 边下边播：LRU 缓存，256mb
-
-## 下载系统
-
-Orpheus 集成了 Media3 的 DownloadManager，抛弃了原先 BBPlayer 中繁琐的下载实现。
-
-## 响度均衡
-
-默认启用，只对未缓存的 b 站音频生效
-
-## 桌面歌词
-
-相信聪明的你去看一下公开方法名就知道怎么使用了！
-（需要注意的是，在切歌时，会自动清空当前的歌词）
-
-## 注意事项
-
-该库一些修改比较随意，我怕后续我自己都忘了，所以在这里进行一下记录。
-
-1. `onTrackStarted` 事件在 v0.9.0 版本后不再存在。需要使用 `registerOrpheusHeadlessTask` 注册事件并自行判断事件是否为 `onTrackStarted`
-
-## 使用
-
-虽然该包是公开的，但仍然主要供 BBPlayer 内部使用。可能不会有完整的文档覆盖。我们欢迎你 fork 后自行修改使用。
+该库主要供 BBPlayer 内部使用，虽然开源，但可能不会处理外部的 Feature Request。

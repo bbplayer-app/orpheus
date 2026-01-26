@@ -1,21 +1,20 @@
-name: Sync Wiki
-
+name: Publish wiki
 on:
   push:
-    branches:
-      - master
+    branches: [master]
     paths:
-      - "docs/**"
-
+      - docs/**
+      - .github/workflows/wiki-sync.yml
+concurrency:
+  group: publish-wiki
+  cancel-in-progress: true
+permissions:
+  contents: write
 jobs:
-  sync-wiki:
+  publish-wiki:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v3
-
-      - name: Sync Wiki
-        uses: spenserblack/actions-wiki-sync@v0.1.0
+      - uses: actions/checkout@v3
+      - uses: Andrew-Chen-Wang/github-wiki-action@v4
         with:
-          wiki_root: docs
-          wiki_commit_message: "chore: sync wiki from docs"
+          path: docs

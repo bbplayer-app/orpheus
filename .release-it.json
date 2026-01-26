@@ -5,7 +5,7 @@
     "requireCleanWorkingDir": false
   },
   "npm": {
-    "publish": false
+    "publish": true
   },
   "github": {
     "release": true
@@ -15,8 +15,5 @@
       "preset": "angular",
       "infile": "CHANGELOG.md"
     }
-  },
-  "hooks": {
-    "after:bump": "node scripts/sync-android-version.js"
   }
 }

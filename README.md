@@ -14,7 +14,7 @@
 
 ## 文档
 
-详细的 API 文档和使用说明请参阅 [API 文档](docs/API.md)。
+详细的 API 文档和使用说明请参阅 [Wiki](docs/Home.md) 或直接查看 `docs/` 目录。
 
 ## 声明
 

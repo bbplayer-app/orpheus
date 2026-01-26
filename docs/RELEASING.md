@@ -20,10 +20,9 @@ npm run release
 
 1. **版本升级**: 根据 commit message (feat/fix/breaking) 自动计算下一个版本号 (SemVer)。
 2. **Changelog**: 生成/更新 `CHANGELOG.md`。
-3. **Android Sync**: 自动将 `package.json` 的版本同步到 `android/build.gradle`。
-4. **Git**: 创建 git tag 并提交。
-5. **Publish**: 发布到 NPM。
-6. **GitHub**: 创建 GitHub Release (包含 Changelog)。
+3. **Git**: 创建 git tag 并提交。
+4. **Publish**: 发布到 NPM。
+5. **GitHub**: 创建 GitHub Release (包含 Changelog)。
 
 ## 提交规范
 

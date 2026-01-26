@@ -9,7 +9,7 @@
     "clean": "expo-module clean",
     "lint": "expo-module lint",
     "test": "expo-module test",
-    "prepare": "husky",
+    "prepare": "lefthook install",
     "prepublishOnly": "expo-module prepublishOnly",
     "expo-module": "expo-module",
     "open:android": "open -a \"Android Studio\" example/android",
@@ -31,11 +31,12 @@
   "devDependencies": {
     "@commitlint/cli": "^20.3.1",
     "@commitlint/config-conventional": "^20.3.1",
+    "@evilmartians/lefthook": "^2.0.15",
     "@release-it/conventional-changelog": "^10.0.4",
     "@types/react": "~19.1.0",
     "expo": "^54.0.24",
     "expo-module-scripts": "^5.0.7",
-    "husky": "^9.1.7",
+    "lefthook": "^2.0.15",
     "prettier": "^3.7.4",
     "react-native": "0.81.5",
     "release-it": "^19.2.4"

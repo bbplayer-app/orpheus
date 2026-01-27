@@ -1,0 +1,349 @@
+import Foundation
+import ExpoModulesCore
+
+class OrpheusDownloadManager: NSObject, URLSessionDownloadDelegate {
+    static let shared = OrpheusDownloadManager()
+    
+    private var urlSession: URLSession!
+    private var downloadTasks: [String: DownloadState] = [:] // Map taskID/url to state
+    private var activeTasks: [String: URLSessionDownloadTask] = [:] // Map ID to task
+    private var trackMap: [String: Track] = [:] // Map ID to Track metadata
+    
+    // Events
+    var onDownloadUpdated: ((DownloadTask) -> Void)?
+    
+    override init() {
+        super.init()
+        let config = URLSessionConfiguration.background(withIdentifier: "com.orpheus.download")
+        config.isDiscretionary = false
+        config.sessionSendsLaunchEvents = true
+        urlSession = URLSession(configuration: config, delegate: self, delegateQueue: nil)
+        
+        restoreTasks()
+    }
+    
+    func downloadTrack(track: Track) {
+        // Resolve URL if needed (Bilibili logic)
+        let urlString = track.url
+        if urlString.starts(with: "orpheus://bilibili") {
+            resolveAndDownload(track: track)
+        } else {
+            startDownload(url: urlString, track: track)
+        }
+    }
+    
+    private func resolveAndDownload(track: Track) {
+        guard let uri = URL(string: track.url),
+              let components = URLComponents(url: uri, resolvingAgainstBaseURL: false) else { return }
+        
+        let bvid = components.queryItems?.first(where: { $0.name == "bvid" })?.value
+        let cid = components.queryItems?.first(where: { $0.name == "cid" })?.value
+        
+        guard let bvid = bvid, let cid = cid else { return }
+        
+        BilibiliApi.shared.getPlayUrl(bvid: bvid, cid: cid) { [weak self] result in
+            DispatchQueue.main.async {
+                switch result {
+                case .success(let realUrl):
+                    self?.startDownload(url: realUrl, track: track)
+                case .failure(let error):
+                    print("Download resolve failed: \(error)")
+                    // Update state to failed
+                    self?.notifyUpdate(id: track.id, state: .failed, track: track)
+                }
+            }
+        }
+    }
+    
+    private func notifyUpdate(id: String, state: DownloadState, track: Track?) {
+        let task = DownloadTask()
+        task.id = id
+        task.state = state
+        task.track = track
+        
+        if state == .completed {
+            task.percentDownloaded = 1.0
+        }
+        
+        onDownloadUpdated?(task)
+    }
+    
+    private func startDownload(url: String, track: Track) {
+        // ... (Header logic) ...
+        guard let nsUrl = URL(string: url) else { return }
+        var request = URLRequest(url: nsUrl)
+        if url.contains("bilivideo.com") {
+             request.setValue("https://www.bilibili.com/", forHTTPHeaderField: "Referer")
+             request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36", forHTTPHeaderField: "User-Agent")
+        }
+        
+        let task = urlSession.downloadTask(with: request)
+        task.taskDescription = track.id
+        
+        trackMap[track.id] = track
+        activeTasks[track.id] = task
+        downloadTasks[track.id] = .downloading
+        
+        task.resume()
+        
+        saveTasks() // Save state
+        notifyUpdate(id: track.id, state: .downloading, track: track)
+    }
+    
+    func removeDownload(id: String) {
+        if let task = activeTasks[id] {
+            task.cancel()
+            activeTasks.removeValue(forKey: id)
+        }
+        
+        // Remove file
+        let fileManager = FileManager.default
+        let docs = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
+        let dest = docs.appendingPathComponent("downloads/\(id).mp4")
+        try? fileManager.removeItem(at: dest)
+        
+        downloadTasks.removeValue(forKey: id)
+        trackMap.removeValue(forKey: id)
+        
+        saveTasks()
+        notifyUpdate(id: id, state: .removing, track: nil)
+    }
+    
+    func removeAllDownloads() {
+        for (_, task) in activeTasks {
+            task.cancel()
+        }
+        activeTasks.removeAll()
+        
+        let fileManager = FileManager.default
+        let docs = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
+        let downloadsDir = docs.appendingPathComponent("downloads")
+        try? fileManager.removeItem(at: downloadsDir)
+        
+        downloadTasks.removeAll()
+        trackMap.removeAll()
+        
+        saveTasks()
+        // Notify? Or just let caller know
+    }
+    
+    // MARK: - Persistence
+    
+    private func getTasksJsulUrl() -> URL {
+        let fileManager = FileManager.default
+        let docs = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
+        return docs.appendingPathComponent("download_tasks.json")
+    }
+    
+    private struct SavedLoudness: Codable {
+        let measured_i: Double
+        let target_i: Double
+    }
+    
+    private struct SavedTrack: Codable {
+        let id: String
+        let url: String
+        let title: String?
+        let artist: String?
+        let artwork: String?
+        let duration: Double?
+        let loudness: SavedLoudness?
+    }
+    
+    private struct PersistedTask: Codable {
+        let id: String
+        let state: Int // Raw value of DownloadState
+        let track: SavedTrack
+    }
+    
+    // Helpers to convert
+    private func toSavedTrack(_ track: Track) -> SavedTrack {
+        var l: SavedLoudness? = nil
+        if let info = track.loudness {
+            l = SavedLoudness(measured_i: info.measured_i, target_i: info.target_i)
+        }
+        return SavedTrack(
+            id: track.id,
+            url: track.url,
+            title: track.title,
+            artist: track.artist,
+            artwork: track.artwork,
+            duration: track.duration,
+            loudness: l
+        )
+    }
+    
+    private func fromSavedTrack(_ saved: SavedTrack) -> Track {
+        let t = Track()
+        t.id = saved.id
+        t.url = saved.url
+        t.title = saved.title
+        t.artist = saved.artist
+        t.artwork = saved.artwork
+        t.duration = saved.duration
+        if let l = saved.loudness {
+            let info = LoudnessInfo()
+            info.measured_i = l.measured_i
+            info.target_i = l.target_i
+            t.loudness = info
+        }
+        return t
+    }
+    
+    private func saveTasks() {
+        let tasksToSave = trackMap.map { (id, track) -> PersistedTask in
+            let state = downloadTasks[id] ?? .queued
+            return PersistedTask(id: id, state: state.rawValue, track: toSavedTrack(track))
+        }
+        
+        do {
+            let data = try JSONEncoder().encode(tasksToSave)
+            try data.write(to: getTasksJsulUrl())
+        } catch {
+            print("Failed to save tasks: \(error)")
+        }
+    }
+    
+    private func restoreTasks() {
+        do {
+            let data = try Data(contentsOf: getTasksJsulUrl())
+            let persisted = try JSONDecoder().decode([PersistedTask].self, from: data)
+            
+            for p in persisted {
+                let track = fromSavedTrack(p.track)
+                trackMap[p.id] = track
+                if let state = DownloadState(rawValue: p.state) {
+                    downloadTasks[p.id] = state
+                }
+            }
+            
+            // Re-attach to background session tasks if needed is handled by URLSession
+            // But we need to map active tasks back to IDs if session was running.
+            urlSession.getAllTasks { [weak self] tasks in
+                DispatchQueue.main.async {
+                    for task in tasks {
+                        if let dlTask = task as? URLSessionDownloadTask, let id = dlTask.taskDescription {
+                            self?.activeTasks[id] = dlTask
+                            // Update state to downloading if it was running
+                            if dlTask.state == .running {
+                                self?.downloadTasks[id] = .downloading
+                            }
+                        }
+                    }
+                }
+            }
+        } catch {
+            print("No saved tasks or failed to load: \(error)")
+        }
+    }
+    
+    // MARK: - Delegate
+    
+    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
+        guard let id = downloadTask.taskDescription else { return }
+        
+        let fileManager = FileManager.default
+        let docs = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
+        let downloadsDir = docs.appendingPathComponent("downloads")
+        
+        do {
+            try fileManager.createDirectory(at: downloadsDir, withIntermediateDirectories: true)
+            // Use mp4 for now. Ideally retain extension from url or metadata.
+            let dest = downloadsDir.appendingPathComponent("\(id).mp4")
+            
+            if fileManager.fileExists(atPath: dest.path) {
+                try fileManager.removeItem(at: dest)
+            }
+            try fileManager.moveItem(at: location, to: dest)
+            
+            downloadTasks[id] = .completed
+            activeTasks.removeValue(forKey: id)
+            saveTasks()
+            
+            if let track = trackMap[id] {
+                notifyUpdate(id: id, state: .completed, track: track)
+            }
+        } catch {
+            print("File move error: \(error)")
+            downloadTasks[id] = .failed
+            saveTasks()
+            notifyUpdate(id: id, state: .failed, track: trackMap[id])
+        }
+    }
+    
+    // ... (didWriteData and didCompleteWithError remain similar but should call saveTasks if state finalizes) ...
+    
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        guard let id = task.taskDescription else { return }
+        
+        if let error = error {
+            print("Download error for \(id): \(error)")
+            if (error as NSError).code == NSURLErrorCancelled {
+                downloadTasks[id] = .stopped
+            } else {
+                downloadTasks[id] = .failed
+                notifyUpdate(id: id, state: .failed, track: trackMap[id])
+            }
+            activeTasks.removeValue(forKey: id)
+            saveTasks()
+        }
+    }
+    
+    func getDownloads() -> [DownloadTask] {
+        return trackMap.map { (id, track) -> DownloadTask in
+            let task = DownloadTask()
+            task.id = id
+            task.state = downloadTasks[id] ?? .queued
+            task.track = track
+            
+            if task.state == .completed {
+                task.percentDownloaded = 1.0
+                task.contentLength = 0 // Calculate fileSize?
+                // Get file size
+                let fileManager = FileManager.default
+                let docs = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
+                let dest = docs.appendingPathComponent("downloads/\(id).mp4")
+                if let attrs = try? fileManager.attributesOfItem(atPath: dest.path),
+                   let size = attrs[.size] as? Double {
+                    task.contentLength = size
+                    task.bytesDownloaded = size
+                }
+            } else if let active = activeTasks[id] {
+                // Approximate from active task?
+                task.bytesDownloaded = Double(active.countOfBytesReceived)
+                task.contentLength = Double(active.countOfBytesExpectedToReceive)
+                task.percentDownloaded = task.contentLength > 0 ? task.bytesDownloaded / task.contentLength : 0
+            }
+            
+            return task
+        }
+    }
+    
+    func multiDownload(tracks: [Track]) {
+        for track in tracks {
+            downloadTrack(track: track)
+        }
+    }
+    
+    func getDownloadStatusByIds(ids: [String]) -> [String: Int] {
+        var result: [String: Int] = [:]
+        for id in ids {
+            if let state = downloadTasks[id] {
+                result[id] = state.rawValue
+            }
+        }
+        return result
+    }
+    
+    func clearUncompletedTasks() {
+        for (id, state) in downloadTasks {
+            if state != .completed {
+                removeDownload(id: id)
+            }
+        }
+    }
+    
+    func getUncompletedTasks() -> [DownloadTask] {
+        return getDownloads().filter { $0.state != .completed }
+    }
+}

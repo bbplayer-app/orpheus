@@ -55,6 +55,7 @@ export default function OrpheusTestScreen() {
 
     const subPlaying = Orpheus.addListener('onIsPlayingChanged', (event) => {
       setIsPlaying(event.status);
+      console.log('IsPlaying Changed:', event.status);
     });
 
     const subProgress = Orpheus.addListener('onPositionUpdate', (event) => {

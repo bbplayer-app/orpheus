@@ -76,7 +76,9 @@ class OrpheusQueueManager {
         var newIndices = Array(0..<backingQueue.count).shuffled()
 
         if currentIndex >= 0 && currentIndex < backingQueue.count {
-
+            if let pos = newIndices.firstIndex(of: currentIndex) {
+                newIndices.swapAt(0, pos)
+            }
         }
         
         shuffleIndices = newIndices

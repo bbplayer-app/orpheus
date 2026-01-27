@@ -23,6 +23,7 @@ import androidx.media3.session.SessionResult
 import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
+import java.util.concurrent.CopyOnWriteArrayList
 import expo.modules.orpheus.R
 import expo.modules.orpheus.utils.DownloadUtil
 import expo.modules.orpheus.utils.SleepTimeController
@@ -71,7 +72,7 @@ class OrpheusMusicService : MediaLibraryService() {
                 }
             }
 
-        private val listeners = mutableListOf<(OrpheusMusicService) -> Unit>()
+        private val listeners = CopyOnWriteArrayList<(OrpheusMusicService) -> Unit>()
 
         fun addOnServiceReadyListener(listener: (OrpheusMusicService) -> Unit) {
             instance?.let { listener(it) }
@@ -345,7 +346,7 @@ class OrpheusMusicService : MediaLibraryService() {
         fun onTrackFinished(trackId: String, finalPosition: Double, duration: Double)
     }
 
-    private val trackEventListeners = mutableListOf<TrackEventListener>()
+    private val trackEventListeners = CopyOnWriteArrayList<TrackEventListener>()
 
     fun addTrackEventListener(listener: TrackEventListener) {
         trackEventListeners.add(listener)

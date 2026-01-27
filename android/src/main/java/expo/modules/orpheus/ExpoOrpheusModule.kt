@@ -179,23 +179,6 @@ class ExpoOrpheusModule : Module() {
                             ))
                         }
                     })
-                    
-                    service.addTrackEventListener(object : OrpheusMusicService.TrackEventListener {
-                        override fun onTrackStarted(trackId: String, reason: Int) {
-                            sendEvent("onTrackStarted", mapOf(
-                                "trackId" to trackId,
-                                "reason" to reason
-                            ))
-                        }
-
-                        override fun onTrackFinished(trackId: String, finalPosition: Double, duration: Double) {
-                            sendEvent("onTrackFinished", mapOf(
-                                "trackId" to trackId,
-                                "finalPosition" to finalPosition,
-                                "duration" to duration
-                            ))
-                        }
-                    })
                 }
             }
 

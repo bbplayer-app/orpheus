@@ -255,7 +255,8 @@ class OrpheusDownloadManager: NSObject, URLSessionDownloadDelegate {
                 let docs = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
                 let downloadsDir = docs.appendingPathComponent("downloads")
                 
-                for (id, state) in self.downloadTasks {
+                let tasksSnapshot = self.downloadTasks
+                for (id, state) in tasksSnapshot {
                     if state == .downloading && !runningTaskIds.contains(id) {
                         let dest = downloadsDir.appendingPathComponent("\(id).mp4")
                         if fileManager.fileExists(atPath: dest.path) {

@@ -88,7 +88,7 @@ class BilibiliApi {
              request.setValue(cookie, forHTTPHeaderField: "Cookie")
          }
          
-         print("[BilibiliApi] getPageList: Requesting \(request.url?.absoluteString ?? "nil")")
+
          
          session.dataTask(with: request) { data, response, error in
              if let error = error {
@@ -104,7 +104,7 @@ class BilibiliApi {
              do {
                  let apiResponse = try JSONDecoder().decode(BilibiliPageListResponse.self, from: data)
                  if apiResponse.code != 0 {
-                     print("[BilibiliApi] getPageList error: \(apiResponse.code) \(apiResponse.message ?? "")")
+
                      completion(.failure(BilibiliError.apiError(code: apiResponse.code, message: apiResponse.message ?? "Unknown error")))
                      return
                  }
@@ -112,10 +112,10 @@ class BilibiliApi {
                  if let firstPage = apiResponse.data?.first {
                      completion(.success(firstPage.cid))
                  } else {
-                     completion(.failure(BilibiliError.decodingFailed)) // Or specific "Empty List" error
+                     completion(.failure(BilibiliError.decodingFailed))
                  }
              } catch {
-                 print("[BilibiliApi] getPageList decode failed: \(error)")
+
                  completion(.failure(error))
              }
          }.resume()
@@ -191,7 +191,7 @@ class BilibiliApi {
         var components = URLComponents(string: "https://api.bilibili.com/x/player/wbi/playurl")!
         components.queryItems = signedParams.map { URLQueryItem(name: $0.key, value: $0.value) }
         
-        print("[BilibiliApi] getPlayUrl: Requesting \(components.url?.absoluteString ?? "nil")")
+
         
         var request = URLRequest(url: components.url!)
         if let cookie = cookie {
@@ -202,7 +202,7 @@ class BilibiliApi {
         
         session.dataTask(with: request) { data, response, error in
             if let error = error {
-                print("[BilibiliApi] Request failed: \(error)")
+
                 completion(.failure(error))
                 return
             }
@@ -212,33 +212,28 @@ class BilibiliApi {
                 return
             }
             
-            // Debug print response
-            if let str = String(data: data, encoding: .utf8) {
-                print("[BilibiliApi] Response: \(str)")
-            }
+
             
             do {
                 let playUrlResponse = try JSONDecoder().decode(BilibiliPlayUrlResponse.self, from: data)
                 
                 if playUrlResponse.code != 0 {
-                     print("[BilibiliApi] API returned error code: \(playUrlResponse.code), message: \(playUrlResponse.message ?? "nil")")
-                     completion(.failure(BilibiliError.requestFailed)) // Create specific error?
+                     completion(.failure(BilibiliError.requestFailed))
                      return
                 }
                 
                 // Prioritize Dash Audio, then Durl
                 if let audioUrl = playUrlResponse.data?.dash?.audio?.first?.baseUrl {
-                    print("[BilibiliApi] Found DASH audio URL")
+
                     completion(.success(audioUrl))
                 } else if let mp4Url = playUrlResponse.data?.durl?.first?.url {
-                    print("[BilibiliApi] Found MP4/DURL URL")
+
                     completion(.success(mp4Url))
                 } else {
-                    print("[BilibiliApi] No playable URL found in response")
-                    completion(.failure(BilibiliError.decodingFailed)) // Or specific "not found"
+                    completion(.failure(BilibiliError.decodingFailed))
                 }
             } catch {
-                print("[BilibiliApi] Decode failed: \(error)")
+
                 completion(.failure(error))
             }
         }.resume()

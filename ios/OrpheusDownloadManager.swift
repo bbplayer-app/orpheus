@@ -47,7 +47,7 @@ class OrpheusDownloadManager: NSObject, URLSessionDownloadDelegate {
                 case .success(let realUrl):
                     self?.startDownload(url: realUrl, track: track)
                 case .failure(let error):
-                    print("Download resolve failed: \(error)")
+
                     // Update state to failed
                     self?.notifyUpdate(id: track.id, state: .failed, track: track)
                 }
@@ -200,7 +200,7 @@ class OrpheusDownloadManager: NSObject, URLSessionDownloadDelegate {
             let data = try JSONEncoder().encode(tasksToSave)
             try data.write(to: getTasksJsulUrl())
         } catch {
-            print("Failed to save tasks: \(error)")
+
         }
     }
     
@@ -233,7 +233,7 @@ class OrpheusDownloadManager: NSObject, URLSessionDownloadDelegate {
                 }
             }
         } catch {
-            print("No saved tasks or failed to load: \(error)")
+
         }
     }
     
@@ -264,7 +264,7 @@ class OrpheusDownloadManager: NSObject, URLSessionDownloadDelegate {
                 notifyUpdate(id: id, state: .completed, track: track)
             }
         } catch {
-            print("File move error: \(error)")
+
             downloadTasks[id] = .failed
             saveTasks()
             notifyUpdate(id: id, state: .failed, track: trackMap[id])
@@ -277,7 +277,7 @@ class OrpheusDownloadManager: NSObject, URLSessionDownloadDelegate {
         guard let id = task.taskDescription else { return }
         
         if let error = error {
-            print("Download error for \(id): \(error)")
+
             if (error as NSError).code == NSURLErrorCancelled {
                 downloadTasks[id] = .stopped
             } else {

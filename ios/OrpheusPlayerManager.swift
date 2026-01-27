@@ -57,14 +57,14 @@ class OrpheusPlayerManager: NSObject {
     
     override func observeValue(forKeyPath keyPath: String?, of object: Any?, change: [NSKeyValueChangeKey : Any]?, context: UnsafeMutableRawPointer?) {
         if keyPath == "timeControlStatus" {
-            print("[OrpheusPlayer] timeControlStatus changed: \(player.timeControlStatus.rawValue)")
+
             notifyPlaybackState()
         } else if keyPath == "currentItem.status" {
             let status = player.currentItem?.status ?? .unknown
-            print("[OrpheusPlayer] currentItem.status changed: \(status.rawValue)")
+
             if status == .failed {
                 let errorMsg = player.currentItem?.error?.localizedDescription ?? "unknown error"
-                print("[OrpheusPlayer] currentItem error: \(errorMsg)")
+
                 onPlayerError?(errorMsg)
                 onPlaybackStateChanged?(.idle)
                 onIsPlayingChanged?(false)
@@ -252,12 +252,12 @@ class OrpheusPlayerManager: NSObject {
     
     func play() {
         if player.currentItem == nil && currentIndex >= 0 {
-             print("[OrpheusPlayer] play() called but currentItem is nil. Retrying track index \(currentIndex)")
+
              playTrack(at: currentIndex, reason: .auto)
              return
         }
         if player.status == .failed || player.currentItem?.status == .failed {
-             print("[OrpheusPlayer] play() called but status is failed. Retrying track index \(currentIndex)")
+
              playTrack(at: currentIndex, reason: .auto)
              return
         }
@@ -324,33 +324,33 @@ class OrpheusPlayerManager: NSObject {
     
     private func playTrack(at index: Int, reason: TransitionReason, startPosition: Double? = nil) {
         guard index >= 0 && index < queue.count else {
-            print("[OrpheusPlayer] playTrack: invalid index \(index), queue count: \(queue.count)")
+
             return
         }
         
         // Optimistic update
         self.currentIndex = index
         let track = queue[index]
-        print("[OrpheusPlayer] playTrack: index=\(index), trackId=\(track.id), title=\(track.title ?? "nil")")
+
         onTrackStarted?(track.id, reason)
         saveState()
         
         let urlString = track.url
-        print("[OrpheusPlayer] playTrack: url=\(urlString)")
+
         
         // Check for local download first
         if let localUrl = OrpheusDownloadManager.shared.getDownloadedFileUrl(id: track.id) {
-            print("[OrpheusPlayer] playTrack: Found local file: \(localUrl.absoluteString)")
+
              // Use local file
              loadAvPlayerItem(url: localUrl.absoluteString, headers: nil, startPosition: startPosition)
              return
         }
         
         if urlString.starts(with: "orpheus://bilibili") {
-            print("[OrpheusPlayer] playTrack: resolving bilibili URL...")
+
             resolveAndPlayBilibili(url: urlString, startPosition: startPosition)
         } else {
-            print("[OrpheusPlayer] playTrack: loading direct URL...")
+
             loadAvPlayerItem(url: urlString, headers: nil, startPosition: startPosition)
         }
     }
@@ -358,7 +358,7 @@ class OrpheusPlayerManager: NSObject {
     private func resolveAndPlayBilibili(url: String, startPosition: Double? = nil) {
         guard let uri = URL(string: url),
               let components = URLComponents(url: uri, resolvingAgainstBaseURL: false) else {
-            print("[OrpheusPlayer] resolveAndPlayBilibili: failed to parse URL: \(url)")
+
             onPlayerError?("Invalid Bilibili URL")
             onPlaybackStateChanged?(.idle)
             return
@@ -368,7 +368,7 @@ class OrpheusPlayerManager: NSObject {
         let cid = components.queryItems?.first(where: { $0.name == "cid" })?.value
         
         guard let bvid = bvid else {
-            print("[OrpheusPlayer] resolveAndPlayBilibili: missing bvid. url=\(url)")
+
             onPlayerError?("Missing bvid in URL")
             onPlaybackStateChanged?(.idle)
             return
@@ -377,15 +377,15 @@ class OrpheusPlayerManager: NSObject {
         if let cid = cid {
             fetchBilibiliPlayUrl(bvid: bvid, cid: cid, startPosition: startPosition)
         } else {
-            print("[OrpheusPlayer] resolveAndPlayBilibili: missing cid, fetching page list...")
+
             BilibiliApi.shared.getPageList(bvid: bvid) { [weak self] result in
                 DispatchQueue.main.async {
                     switch result {
                     case .success(let cidInt):
-                        print("[OrpheusPlayer] Got cid: \(cidInt)")
+
                         self?.fetchBilibiliPlayUrl(bvid: bvid, cid: String(cidInt), startPosition: startPosition)
                     case .failure(let error):
-                        print("[OrpheusPlayer] resolveAndPlayBilibili: getPageList failed: \(error)")
+
                         self?.onPlayerError?(error.localizedDescription)
                         self?.onPlaybackStateChanged?(.idle)
                     }
@@ -395,13 +395,13 @@ class OrpheusPlayerManager: NSObject {
     }
     
     private func fetchBilibiliPlayUrl(bvid: String, cid: String, startPosition: Double? = nil) {
-        print("[OrpheusPlayer] fetchBilibiliPlayUrl: bvid=\(bvid), cid=\(cid)")
+
         
         BilibiliApi.shared.getPlayUrl(bvid: bvid, cid: cid) { [weak self] result in
             DispatchQueue.main.async {
                 switch result {
                 case .success(let realUrl):
-                    print("[OrpheusPlayer] fetchBilibiliPlayUrl: got realUrl=\(realUrl.prefix(100))...")
+
                     // Bilibili requires Referer header
                     let headers: [String: String] = [
                         "Referer": "https://www.bilibili.com/",
@@ -409,7 +409,7 @@ class OrpheusPlayerManager: NSObject {
                     ]
                     self?.loadAvPlayerItem(url: realUrl, headers: headers, startPosition: startPosition)
                 case .failure(let error):
-                    print("[OrpheusPlayer] fetchBilibiliPlayUrl: FAILED - \(error)")
+
                     self?.onPlayerError?(error.localizedDescription)
                     // Reset state so UI doesn't stick in loading
                     self?.onPlaybackStateChanged?(.idle)
@@ -420,11 +420,11 @@ class OrpheusPlayerManager: NSObject {
     
     private func loadAvPlayerItem(url: String, headers: [String: String]?, startPosition: Double? = nil) {
         guard let nsUrl = URL(string: url) else {
-            print("[OrpheusPlayer] loadAvPlayerItem: invalid URL string: \(url)")
+
             return
         }
         
-        print("[OrpheusPlayer] loadAvPlayerItem: creating asset with headers=\(headers != nil)")
+
         
         let asset: AVURLAsset
         if let headers = headers {
@@ -436,7 +436,7 @@ class OrpheusPlayerManager: NSObject {
         
         let item = AVPlayerItem(asset: asset)
         
-        print("[OrpheusPlayer] loadAvPlayerItem: replacing current item and calling play()")
+
         player.replaceCurrentItem(with: item)
         if let startPos = startPosition, startPos > 0 {
              let time = CMTime(seconds: startPos, preferredTimescale: 1000)
@@ -444,7 +444,7 @@ class OrpheusPlayerManager: NSObject {
         }
         player.play()
         
-        print("[OrpheusPlayer] loadAvPlayerItem: player.rate=\(player.rate), timeControlStatus=\(player.timeControlStatus.rawValue)")
+
     }
     
     // MARK: - Notification
@@ -468,21 +468,16 @@ class OrpheusPlayerManager: NSObject {
         switch player.timeControlStatus {
         case .paused:
             state = .ready
-            print("[OrpheusPlayer] notifyPlaybackState: paused -> ready")
+
         case .waitingToPlayAtSpecifiedRate:
             state = .buffering
-            // 打印等待原因
-            if let reason = player.reasonForWaitingToPlay {
-                print("[OrpheusPlayer] notifyPlaybackState: waiting -> buffering, reason=\(reason.rawValue)")
-            } else {
-                print("[OrpheusPlayer] notifyPlaybackState: waiting -> buffering, reason=nil")
-            }
+
         case .playing:
             state = .ready
-            print("[OrpheusPlayer] notifyPlaybackState: playing -> ready")
+
         @unknown default:
             state = .idle
-            print("[OrpheusPlayer] notifyPlaybackState: unknown -> idle")
+
         }
         
         onPlaybackStateChanged?(state)
@@ -506,7 +501,7 @@ class OrpheusPlayerManager: NSObject {
             // Interruption observer
             NotificationCenter.default.addObserver(self, selector: #selector(handleInterruption), name: AVAudioSession.interruptionNotification, object: session)
         } catch {
-            print("Failed to setup audio session: \(error)")
+
         }
     }
     
@@ -768,24 +763,15 @@ class OrpheusPlayerManager: NSObject {
                 
                 // Auto Play Logic
                 if GeneralStorage.shared.isAutoplayOnStartEnabled {
-                    print("[OrpheusPlayer] restoreState: Autoplay Enabled. Playing track index \(savedIndex) at position \(savedPosition)")
+
                     playTrack(at: savedIndex, reason: .playlistChanged, startPosition: savedPosition > 0 ? savedPosition : nil)
                 } else {
                     // Start Paused
-                    print("[OrpheusPlayer] restoreState: Autoplay Disabled. Loading track index \(savedIndex) paused.")
+
                      onTrackStarted?(track.id, .playlistChanged)
                      
                      // If we want to be ready to play at position:
-                     /*
-                     let urlString = track.url
-                     if !urlString.starts(with: "orpheus://bilibili") { // Skip async bili for startup perf?
-                         let asset = AVURLAsset(url: URL(string: urlString)!)
-                         let item = AVPlayerItem(asset: asset)
-                         player.replaceCurrentItem(with: item)
-                         player.seek(to: CMTime(seconds: savedPosition, preferredTimescale: 1000))
-                         // player is paused by default
-                     }
-                     */
+
                      // Simple approach: restore indices, let UI show it. 
                      // Updating position might be tricky if player is empty.
                      // We can emit a position update manually?

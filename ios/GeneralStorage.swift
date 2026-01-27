@@ -45,7 +45,7 @@ class GeneralStorage {
             }
             defaults.set(jsonList, forKey: KEY_SAVED_QUEUE)
         } catch {
-            print("[GeneralStorage] Failed to save queue: \(error)")
+
         }
     }
     

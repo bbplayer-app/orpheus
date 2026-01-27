@@ -43,7 +43,7 @@ public class ExpoOrpheusModule: Module {
     public func definition() -> ModuleDefinition {
         Name("Orpheus")
         
-        // Events
+
         Events(
             "onPlaybackStateChanged",
             "onTrackStarted",
@@ -124,7 +124,6 @@ public class ExpoOrpheusModule: Module {
     AsyncFunction("play") {
         OrpheusPlayerManager.shared.play()
     }
-
     AsyncFunction("pause") {
         OrpheusPlayerManager.shared.pause()
     }

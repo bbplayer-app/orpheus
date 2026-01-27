@@ -1,5 +1,6 @@
 import Foundation
 import ExpoModulesCore
+import MMKV
 
 class OrpheusDownloadManager: NSObject, URLSessionDownloadDelegate {
     static let shared = OrpheusDownloadManager()
@@ -8,8 +9,6 @@ class OrpheusDownloadManager: NSObject, URLSessionDownloadDelegate {
     private var downloadTasks: [String: DownloadState] = [:] // Map taskID/url to state
     private var activeTasks: [String: URLSessionDownloadTask] = [:] // Map ID to task
     private var trackMap: [String: Track] = [:] // Map ID to Track metadata
-    
-    // Events
     var onDownloadUpdated: ((DownloadTask) -> Void)?
     
     override init() {
@@ -47,8 +46,6 @@ class OrpheusDownloadManager: NSObject, URLSessionDownloadDelegate {
                 case .success(let realUrl):
                     self?.startDownload(url: realUrl, track: track)
                 case .failure(let error):
-
-                    // Update state to failed
                     self?.notifyUpdate(id: track.id, state: .failed, track: track)
                 }
             }
@@ -67,8 +64,7 @@ class OrpheusDownloadManager: NSObject, URLSessionDownloadDelegate {
         
         onDownloadUpdated?(task)
     }
-    
-    private func startDownload(url: String, track: Track) {
+        private func startDownload(url: String, track: Track) {
 
         guard let nsUrl = URL(string: url) else { return }
         var request = URLRequest(url: nsUrl)
@@ -86,7 +82,7 @@ class OrpheusDownloadManager: NSObject, URLSessionDownloadDelegate {
         
         task.resume()
         
-        saveTasks() // Save state
+        saveTasks()
         notifyUpdate(id: track.id, state: .downloading, track: track)
     }
     
@@ -96,7 +92,7 @@ class OrpheusDownloadManager: NSObject, URLSessionDownloadDelegate {
             activeTasks.removeValue(forKey: id)
         }
         
-        // Remove file
+
         let fileManager = FileManager.default
         let docs = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
         let dest = docs.appendingPathComponent("downloads/\(id).mp4")
@@ -124,21 +120,11 @@ class OrpheusDownloadManager: NSObject, URLSessionDownloadDelegate {
         trackMap.removeAll()
         
         saveTasks()
-        // Notify? Or just let caller know
     }
     
     // MARK: - Persistence
     
-    private func getTasksJsulUrl() -> URL {
-        let fileManager = FileManager.default
-        let docs = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
-        return docs.appendingPathComponent("download_tasks.json")
-    }
-    
-    private struct SavedLoudness: Codable {
-        let measured_i: Double
-        let target_i: Double
-    }
+    private let KEY_SAVED_TASKS = "saved_download_tasks"
     
     private struct SavedTrack: Codable {
         let id: String
@@ -147,21 +133,16 @@ class OrpheusDownloadManager: NSObject, URLSessionDownloadDelegate {
         let artist: String?
         let artwork: String?
         let duration: Double?
-        let loudness: SavedLoudness?
     }
     
     private struct PersistedTask: Codable {
         let id: String
-        let state: Int // Raw value of DownloadState
+        let state: Int
         let track: SavedTrack
     }
     
-    // Helpers to convert
+
     private func toSavedTrack(_ track: Track) -> SavedTrack {
-        var l: SavedLoudness? = nil
-        if let info = track.loudness {
-            l = SavedLoudness(measured_i: info.measured_i, target_i: info.target_i)
-        }
         return SavedTrack(
             id: track.id,
             url: track.url,
@@ -169,7 +150,6 @@ class OrpheusDownloadManager: NSObject, URLSessionDownloadDelegate {
             artist: track.artist,
             artwork: track.artwork,
             duration: track.duration,
-            loudness: l
         )
     }
     
@@ -181,12 +161,6 @@ class OrpheusDownloadManager: NSObject, URLSessionDownloadDelegate {
         t.artist = saved.artist
         t.artwork = saved.artwork
         t.duration = saved.duration
-        if let l = saved.loudness {
-            let info = LoudnessInfo()
-            info.measured_i = l.measured_i
-            info.target_i = l.target_i
-            t.loudness = info
-        }
         return t
     }
     
@@ -196,44 +170,55 @@ class OrpheusDownloadManager: NSObject, URLSessionDownloadDelegate {
             return PersistedTask(id: id, state: state.rawValue, track: toSavedTrack(track))
         }
         
-        do {
-            let data = try JSONEncoder().encode(tasksToSave)
-            try data.write(to: getTasksJsulUrl())
-        } catch {
-
+        if let data = try? JSONEncoder().encode(tasksToSave) {
+            MMKV.default()?.set(data, forKey: KEY_SAVED_TASKS)
         }
     }
     
     private func restoreTasks() {
-        do {
-            let data = try Data(contentsOf: getTasksJsulUrl())
-            let persisted = try JSONDecoder().decode([PersistedTask].self, from: data)
+        guard let data = MMKV.default()?.data(forKey: KEY_SAVED_TASKS),
+              let persisted = try? JSONDecoder().decode([PersistedTask].self, from: data) else {
+            return
+        }
             
-            for p in persisted {
-                let track = fromSavedTrack(p.track)
-                trackMap[p.id] = track
-                if let state = DownloadState(rawValue: p.state) {
-                    downloadTasks[p.id] = state
-                }
+        for p in persisted {
+            let track = fromSavedTrack(p.track)
+            trackMap[p.id] = track
+            if let state = DownloadState(rawValue: p.state) {
+                downloadTasks[p.id] = state
             }
-            
-            // Re-attach to background session tasks if needed is handled by URLSession
-            // But we need to map active tasks back to IDs if session was running.
-            urlSession.getAllTasks { [weak self] tasks in
-                DispatchQueue.main.async {
-                    for task in tasks {
-                        if let dlTask = task as? URLSessionDownloadTask, let id = dlTask.taskDescription {
-                            self?.activeTasks[id] = dlTask
-                            // Update state to downloading if it was running
-                            if dlTask.state == .running {
-                                self?.downloadTasks[id] = .downloading
-                            }
+        }
+        
+        // Check for existing background tasks first
+        urlSession.getAllTasks { [weak self] tasks in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                
+                var runningTaskIds = Set<String>()
+                
+                for task in tasks {
+                    if let dlTask = task as? URLSessionDownloadTask, let id = dlTask.taskDescription {
+                        self.activeTasks[id] = dlTask
+                        runningTaskIds.insert(id)
+                        
+                        // Update state to downloading if it was running
+                        if dlTask.state == .running {
+                            self.downloadTasks[id] = .downloading
+                        }
+                    }
+                }
+                
+                // Auto-resume downloads that should be running but aren't
+                for (id, state) in self.downloadTasks {
+                    if state == .downloading && !runningTaskIds.contains(id) {
+                        // User might have force quit app or system killed it while not strictly in background task?
+                        // Restart download
+                        if let track = self.trackMap[id] {
+                            self.downloadTrack(track: track)
                         }
                     }
                 }
             }
-        } catch {
-
         }
     }
     
@@ -298,8 +283,7 @@ class OrpheusDownloadManager: NSObject, URLSessionDownloadDelegate {
             
             if task.state == .completed {
                 task.percentDownloaded = 1.0
-                task.contentLength = 0 // Calculate fileSize?
-                // Get file size
+                task.contentLength = 0
                 let fileManager = FileManager.default
                 let docs = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
                 let dest = docs.appendingPathComponent("downloads/\(id).mp4")
@@ -309,7 +293,7 @@ class OrpheusDownloadManager: NSObject, URLSessionDownloadDelegate {
                     task.bytesDownloaded = size
                 }
             } else if let active = activeTasks[id] {
-                // Approximate from active task?
+
                 task.bytesDownloaded = Double(active.countOfBytesReceived)
                 task.contentLength = Double(active.countOfBytesExpectedToReceive)
                 task.percentDownloaded = task.contentLength > 0 ? task.bytesDownloaded / task.contentLength : 0

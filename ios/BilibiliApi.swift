@@ -50,7 +50,7 @@ struct BilibiliPlayUrlResponse: Codable {
     }
 }
 
-// Response for PageList
+
 struct BilibiliPageListResponse: Codable {
     let code: Int
     let message: String?
@@ -69,7 +69,7 @@ class BilibiliApi {
     private let session = URLSession.shared
     private var cookie: String?
     
-    // Wbi keys cache
+
     private var imgKey: String?
     private var subKey: String?
     private var wbiKeysUpdatedAt: Date?
@@ -104,7 +104,6 @@ class BilibiliApi {
              do {
                  let apiResponse = try JSONDecoder().decode(BilibiliPageListResponse.self, from: data)
                  if apiResponse.code != 0 {
-
                      completion(.failure(BilibiliError.apiError(code: apiResponse.code, message: apiResponse.message ?? "Unknown error")))
                      return
                  }
@@ -115,7 +114,6 @@ class BilibiliApi {
                      completion(.failure(BilibiliError.decodingFailed))
                  }
              } catch {
-
                  completion(.failure(error))
              }
          }.resume()
@@ -178,12 +176,12 @@ class BilibiliApi {
         let params: [String: Any] = [
             "bvid": bvid,
             "cid": cid,
-            "qn": 80, // 1080P
+            "qn": 80,
             // fnval=1 requests MP4/FLV durl list which is better for AVPlayer
             "fnval": 1, 
             "fnver": 0,
             "fourk": 1,
-            "platform": "html5" // Explicitly request html5 compatible (mp4)
+            "platform": "html5"
         ]
         
         let signedParams = WbiUtil.sign(params: params, imgKey: imgKey, subKey: subKey)
@@ -191,7 +189,6 @@ class BilibiliApi {
         var components = URLComponents(string: "https://api.bilibili.com/x/player/wbi/playurl")!
         components.queryItems = signedParams.map { URLQueryItem(name: $0.key, value: $0.value) }
         
-
         
         var request = URLRequest(url: components.url!)
         if let cookie = cookie {
@@ -202,7 +199,6 @@ class BilibiliApi {
         
         session.dataTask(with: request) { data, response, error in
             if let error = error {
-
                 completion(.failure(error))
                 return
             }
@@ -212,7 +208,6 @@ class BilibiliApi {
                 return
             }
             
-
             
             do {
                 let playUrlResponse = try JSONDecoder().decode(BilibiliPlayUrlResponse.self, from: data)
@@ -224,16 +219,13 @@ class BilibiliApi {
                 
                 // Prioritize Dash Audio, then Durl
                 if let audioUrl = playUrlResponse.data?.dash?.audio?.first?.baseUrl {
-
                     completion(.success(audioUrl))
                 } else if let mp4Url = playUrlResponse.data?.durl?.first?.url {
-
                     completion(.success(mp4Url))
                 } else {
                     completion(.failure(BilibiliError.decodingFailed))
                 }
             } catch {
-
                 completion(.failure(error))
             }
         }.resume()

@@ -27,10 +27,6 @@ export interface Track {
   artist?: string;
   artwork?: string;
   duration?: number;
-  loudness?: {
-    measured_i: number;
-    target_i: number;
-  }
 }
 
 export type PlaybackErrorEvent = {

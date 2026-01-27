@@ -62,22 +62,16 @@ public class ExpoOrpheusModule: Module {
         // MARK: - Preferences
         
         Property("restorePlaybackPositionEnabled")
-            .get { return UserDefaults.standard.bool(forKey: "restorePlaybackPositionEnabled") }
-            .set { (newValue: Bool) in
-                UserDefaults.standard.set(newValue, forKey: "restorePlaybackPositionEnabled")
-            }
+            .get { GeneralStorage.shared.isRestoreEnabled }
+            .set { GeneralStorage.shared.isRestoreEnabled = $0 }
         
         Property("loudnessNormalizationEnabled")
-            .get { return UserDefaults.standard.bool(forKey: "loudnessNormalizationEnabled") }
-            .set { (newValue: Bool) in
-                UserDefaults.standard.set(newValue, forKey: "loudnessNormalizationEnabled")
-            }
+            .get { GeneralStorage.shared.isLoudnessNormalizationEnabled }
+            .set { GeneralStorage.shared.isLoudnessNormalizationEnabled = $0 }
         
         Property("autoplayOnStartEnabled")
-            .get { return UserDefaults.standard.bool(forKey: "autoplayOnStartEnabled") }
-            .set { (newValue: Bool) in
-                UserDefaults.standard.set(newValue, forKey: "autoplayOnStartEnabled")
-            }
+            .get { GeneralStorage.shared.isAutoplayOnStartEnabled }
+            .set { GeneralStorage.shared.isAutoplayOnStartEnabled = $0 }
         
     // MARK: - Getters
     

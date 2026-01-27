@@ -69,7 +69,7 @@ class OrpheusDownloadManager: NSObject, URLSessionDownloadDelegate {
     }
     
     private func startDownload(url: String, track: Track) {
-        // ... (Header logic) ...
+
         guard let nsUrl = URL(string: url) else { return }
         var request = URLRequest(url: nsUrl)
         if url.contains("bilivideo.com") {
@@ -271,7 +271,7 @@ class OrpheusDownloadManager: NSObject, URLSessionDownloadDelegate {
         }
     }
     
-    // ... (didWriteData and didCompleteWithError remain similar but should call saveTasks if state finalizes) ...
+
     
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         guard let id = task.taskDescription else { return }
@@ -345,5 +345,16 @@ class OrpheusDownloadManager: NSObject, URLSessionDownloadDelegate {
     
     func getUncompletedTasks() -> [DownloadTask] {
         return getDownloads().filter { $0.state != .completed }
+    }
+    
+    func getDownloadedFileUrl(id: String) -> URL? {
+        let fileManager = FileManager.default
+        let docs = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
+        let dest = docs.appendingPathComponent("downloads/\(id).mp4")
+        
+        if fileManager.fileExists(atPath: dest.path) {
+            return dest
+        }
+        return nil
     }
 }

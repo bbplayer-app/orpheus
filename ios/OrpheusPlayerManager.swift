@@ -12,11 +12,7 @@ class OrpheusPlayerManager: NSObject {
     var repeatMode: RepeatMode = .off
     var shuffleMode: Bool = false
     
-    // Add conformance for encoding/decoding
-    // Record in Expo might act as Codable but let's be explicit if needed or rely on standard Codable for struct
-    // Since Track is struct, we need it to verify conformity.
-    // Expo's Record: "A Swift struct that implements this protocol can be converted to/from a JS object."
-    // It implements Codable.
+
     
     // Image Cache
     private var imageCache = NSCache<NSString, UIImage>()
@@ -176,41 +172,22 @@ class OrpheusPlayerManager: NSObject {
             return
         }
         
-        // Insert after current index
         let insertIndex = currentIndex + 1
         queue.insert(track, at: insertIndex)
-        originalQueue.append(track) // Append to original? Or insert? 
-        // If shuffled, original order doesn't matter much for Play Next, 
-        // but if un-shuffled, we expect it to be there. 
-        // Ideally we insert it into originalQueue too? 
-        // If we unshuffle we usually revert to originalQueue. 
-        // So "Play Next" is a queue manipulation. 
-        // For now append to original to keep it safe.
+        originalQueue.append(track)
     }
     
     // ... (addToEnd implementation) ...
     
     func addToEnd(tracks: [Track], startFromId: String?, clearQueue: Bool) {
         if clearQueue {
-            setQueue(tracks, startIndex: 0) // Should find startFromId index logic if needed, but simple for now
-            // If startFromId provided, we should find it in the new tracks
+            setQueue(tracks, startIndex: 0)
             if let startId = startFromId, let index = tracks.firstIndex(where: { $0.id == startId }) {
-                // If shuffle is on, we need to respect that.
-                // setQueue handles playing at startIndex.
-                // Re-call setQueue with correct index
                 setQueue(tracks, startIndex: index)
             }
         } else {
             originalQueue.append(contentsOf: tracks)
-            if shuffleMode {
-                // Append random? Or just append and reshuffle?
-                // Standard behavior: Append to queue, maybe shuffle the new part?
-                // Simplest: Append to queue, don't reshuffle entire existing played history.
-                // We just append to `queue` as well for now to keep it simple.
-                queue.append(contentsOf: tracks)
-            } else {
-                queue.append(contentsOf: tracks)
-            }
+            queue.append(contentsOf: tracks)
         }
         
         if !clearQueue, let startId = startFromId {
@@ -345,7 +322,7 @@ class OrpheusPlayerManager: NSObject {
     
     // MARK: - Track Loading
     
-    private func playTrack(at index: Int, reason: TransitionReason) {
+    private func playTrack(at index: Int, reason: TransitionReason, startPosition: Double? = nil) {
         guard index >= 0 && index < queue.count else {
             print("[OrpheusPlayer] playTrack: invalid index \(index), queue count: \(queue.count)")
             return
@@ -360,16 +337,25 @@ class OrpheusPlayerManager: NSObject {
         
         let urlString = track.url
         print("[OrpheusPlayer] playTrack: url=\(urlString)")
+        
+        // Check for local download first
+        if let localUrl = OrpheusDownloadManager.shared.getDownloadedFileUrl(id: track.id) {
+            print("[OrpheusPlayer] playTrack: Found local file: \(localUrl.absoluteString)")
+             // Use local file
+             loadAvPlayerItem(url: localUrl.absoluteString, headers: nil, startPosition: startPosition)
+             return
+        }
+        
         if urlString.starts(with: "orpheus://bilibili") {
             print("[OrpheusPlayer] playTrack: resolving bilibili URL...")
-            resolveAndPlayBilibili(url: urlString)
+            resolveAndPlayBilibili(url: urlString, startPosition: startPosition)
         } else {
             print("[OrpheusPlayer] playTrack: loading direct URL...")
-            loadAvPlayerItem(url: urlString, headers: nil)
+            loadAvPlayerItem(url: urlString, headers: nil, startPosition: startPosition)
         }
     }
     
-    private func resolveAndPlayBilibili(url: String) {
+    private func resolveAndPlayBilibili(url: String, startPosition: Double? = nil) {
         guard let uri = URL(string: url),
               let components = URLComponents(url: uri, resolvingAgainstBaseURL: false) else {
             print("[OrpheusPlayer] resolveAndPlayBilibili: failed to parse URL: \(url)")
@@ -389,7 +375,7 @@ class OrpheusPlayerManager: NSObject {
         }
         
         if let cid = cid {
-            fetchBilibiliPlayUrl(bvid: bvid, cid: cid)
+            fetchBilibiliPlayUrl(bvid: bvid, cid: cid, startPosition: startPosition)
         } else {
             print("[OrpheusPlayer] resolveAndPlayBilibili: missing cid, fetching page list...")
             BilibiliApi.shared.getPageList(bvid: bvid) { [weak self] result in
@@ -397,7 +383,7 @@ class OrpheusPlayerManager: NSObject {
                     switch result {
                     case .success(let cidInt):
                         print("[OrpheusPlayer] Got cid: \(cidInt)")
-                        self?.fetchBilibiliPlayUrl(bvid: bvid, cid: String(cidInt))
+                        self?.fetchBilibiliPlayUrl(bvid: bvid, cid: String(cidInt), startPosition: startPosition)
                     case .failure(let error):
                         print("[OrpheusPlayer] resolveAndPlayBilibili: getPageList failed: \(error)")
                         self?.onPlayerError?(error.localizedDescription)
@@ -408,7 +394,7 @@ class OrpheusPlayerManager: NSObject {
         }
     }
     
-    private func fetchBilibiliPlayUrl(bvid: String, cid: String) {
+    private func fetchBilibiliPlayUrl(bvid: String, cid: String, startPosition: Double? = nil) {
         print("[OrpheusPlayer] fetchBilibiliPlayUrl: bvid=\(bvid), cid=\(cid)")
         
         BilibiliApi.shared.getPlayUrl(bvid: bvid, cid: cid) { [weak self] result in
@@ -421,7 +407,7 @@ class OrpheusPlayerManager: NSObject {
                         "Referer": "https://www.bilibili.com/",
                         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
                     ]
-                    self?.loadAvPlayerItem(url: realUrl, headers: headers)
+                    self?.loadAvPlayerItem(url: realUrl, headers: headers, startPosition: startPosition)
                 case .failure(let error):
                     print("[OrpheusPlayer] fetchBilibiliPlayUrl: FAILED - \(error)")
                     self?.onPlayerError?(error.localizedDescription)
@@ -432,7 +418,7 @@ class OrpheusPlayerManager: NSObject {
         }
     }
     
-    private func loadAvPlayerItem(url: String, headers: [String: String]?) {
+    private func loadAvPlayerItem(url: String, headers: [String: String]?, startPosition: Double? = nil) {
         guard let nsUrl = URL(string: url) else {
             print("[OrpheusPlayer] loadAvPlayerItem: invalid URL string: \(url)")
             return
@@ -452,6 +438,10 @@ class OrpheusPlayerManager: NSObject {
         
         print("[OrpheusPlayer] loadAvPlayerItem: replacing current item and calling play()")
         player.replaceCurrentItem(with: item)
+        if let startPos = startPosition, startPos > 0 {
+             let time = CMTime(seconds: startPos, preferredTimescale: 1000)
+             player.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero)
+        }
         player.play()
         
         print("[OrpheusPlayer] loadAvPlayerItem: player.rate=\(player.rate), timeControlStatus=\(player.timeControlStatus.rawValue)")
@@ -544,6 +534,23 @@ class OrpheusPlayerManager: NSObject {
     private func setupRemoteCommands() {
         let commandCenter = MPRemoteCommandCenter.shared()
         
+        commandCenter.togglePlayPauseCommand.isEnabled = true
+        commandCenter.playCommand.isEnabled = true
+        commandCenter.pauseCommand.isEnabled = true
+        commandCenter.nextTrackCommand.isEnabled = true
+        commandCenter.previousTrackCommand.isEnabled = true
+        commandCenter.changePlaybackPositionCommand.isEnabled = true
+        
+        commandCenter.togglePlayPauseCommand.addTarget { [weak self] event in
+            guard let self = self else { return .commandFailed }
+            if self.isPlaying() {
+                self.pause()
+            } else {
+                self.play()
+            }
+            return .success
+        }
+        
         commandCenter.playCommand.addTarget { [weak self] event in
             self?.play()
             return .success
@@ -581,12 +588,6 @@ class OrpheusPlayerManager: NSObject {
         
         // Ensure audio session is active for lock screen controls to appear
         // Sometimes it gets deactivated on pause or background switch
-        // do {
-        //     try AVAudioSession.sharedInstance().setActive(true)
-        // } catch {
-        //     print("Failed to activate audio session for NowPlayingInfo: \(error)")
-        // }
-        // Note: Activating session repeatedly might be expensive, do it only if needed or keep it active.
         
         let track = queue[currentIndex]
         
@@ -654,22 +655,6 @@ class OrpheusPlayerManager: NSObject {
     
     func setPlaybackSpeed(_ speed: Float) {
         player.rate = speed
-        // player.rate sets playing immediately if speed > 0
-        // If paused, we might want to store it and apply when play? 
-        // AVPlayer.rate implies playing. 
-        // To change speed but keep pause state: 
-        // player.defaultRate = speed (iOS 10+)? 
-        // Actually typically valid user expectation: setting speed usually updates active rate.
-        // But if paused? 
-        if player.timeControlStatus == .paused {
-             // Just property setting, don't play?
-             // But AVPlayer.rate = x IS play()
-             // We can use `player.audiovisualBackgroundPlaybackPolicy` or similar? 
-             // Best practice: 
-             // set rate to speed. If we were paused, pause again provided rate != 0?
-        }
-        // Simplified: set rate.
-        player.rate = speed
     }
     
     func getPlaybackSpeed() -> Float {
@@ -721,78 +706,43 @@ class OrpheusPlayerManager: NSObject {
     
     // MARK: - Persistence
     
-    private let KEY_SAVED_QUEUE = "saved_queue_json_list"
-    private let KEY_SAVED_INDEX = "saved_index"
-    private let KEY_SAVED_POSITION = "saved_position"
-    private let KEY_SAVED_REPEAT_MODE = "saved_repeat_mode"
-    private let KEY_SAVED_SHUFFLE_MODE = "saved_shuffle_mode"
-    
     private func saveState() {
-        let defaults = UserDefaults.standard
+        GeneralStorage.shared.saveQueue(queue)
         
-        // Save Queue (JSON list)
-        // Convert [Track] to JSON strings using manual dictionary conversion
-        do {
-            let jsonList = try queue.compactMap { track -> String? in
-                let dict = track.dictionaryRepresentation
-                let data = try JSONSerialization.data(withJSONObject: dict, options: [])
-                return String(data: data, encoding: .utf8)
-            }
-            defaults.set(jsonList, forKey: KEY_SAVED_QUEUE)
-        } catch {
-            print("[OrpheusPlayer] Failed to save queue: \(error)")
-        }
+        GeneralStorage.shared.savePosition(
+            index: currentIndex,
+            positionSec: player.currentTime().seconds
+        )
         
-        defaults.set(currentIndex, forKey: KEY_SAVED_INDEX)
-        defaults.set(repeatMode.rawValue, forKey: KEY_SAVED_REPEAT_MODE)
-        defaults.set(shuffleMode, forKey: KEY_SAVED_SHUFFLE_MODE)
-        
-        savePositionState()
+        GeneralStorage.shared.saveRepeatMode(repeatMode.rawValue)
+        GeneralStorage.shared.saveShuffleMode(shuffleMode)
     }
     
     private func savePositionState() {
         let seconds = player.currentTime().seconds
-        if seconds.isNaN || seconds.isInfinite {
-            return
-        }
-        let position = Int64(seconds * 1000)
-        UserDefaults.standard.set(position, forKey: KEY_SAVED_POSITION)
+        GeneralStorage.shared.savePosition(index: currentIndex, positionSec: seconds)
     }
 
     private func restoreState() {
-        let defaults = UserDefaults.standard
-        
         // Restore Modes
-        if let mode = RepeatMode(rawValue: defaults.integer(forKey: KEY_SAVED_REPEAT_MODE)) {
+        if let mode = RepeatMode(rawValue: GeneralStorage.shared.getSavedRepeatMode()) {
             repeatMode = mode
         }
-        shuffleMode = defaults.bool(forKey: KEY_SAVED_SHUFFLE_MODE)
+        shuffleMode = GeneralStorage.shared.getSavedShuffleMode()
         
         // Restore Queue
-        if let jsonList = defaults.stringArray(forKey: KEY_SAVED_QUEUE) {
-            do {
-                var restoredQueue: [Track] = []
-                for jsonStr in jsonList {
-                    if let data = jsonStr.data(using: .utf8),
-                       let dict = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
-                       let track = Track(dictionary: dict) {
-                        restoredQueue.append(track)
-                    }
-                }
-                
-                if !restoredQueue.isEmpty {
-                    originalQueue = restoredQueue
-                    queue = restoredQueue 
-                    originalQueue = restoredQueue // Fallback
-                }
-            } catch {
-                print("[OrpheusPlayer] Failed to restore queue: \(error)")
-            }
+        let restoredQueue = GeneralStorage.shared.getSavedQueue()
+        if !restoredQueue.isEmpty {
+            originalQueue = restoredQueue
+            queue = restoredQueue
         }
         
         // Restore Index and Position
-        let savedIndex = defaults.integer(forKey: KEY_SAVED_INDEX)
-        let savedPosition = defaults.double(forKey: KEY_SAVED_POSITION) / 1000.0
+        let savedIndex = GeneralStorage.shared.getSavedIndex()
+        var savedPosition = 0.0
+        if GeneralStorage.shared.isRestoreEnabled {
+            savedPosition = GeneralStorage.shared.getSavedPosition()
+        }
         
         if !queue.isEmpty {
             self.currentIndex = savedIndex
@@ -816,23 +766,31 @@ class OrpheusPlayerManager: NSObject {
                 // Cannot call playTrack -> it plays.
                 // We manually set up.
                 
-                 onTrackStarted?(track.id, .playlistChanged)
-                 
-                 // If we want to be ready to play at position:
-                 /*
-                 let urlString = track.url
-                 if !urlString.starts(with: "orpheus://bilibili") { // Skip async bili for startup perf?
-                     let asset = AVURLAsset(url: URL(string: urlString)!)
-                     let item = AVPlayerItem(asset: asset)
-                     player.replaceCurrentItem(with: item)
-                     player.seek(to: CMTime(seconds: savedPosition, preferredTimescale: 1000))
-                     // player is paused by default
-                 }
-                 */
-                 // Simple approach: restore indices, let UI show it. 
-                 // Updating position might be tricky if player is empty.
-                 // We can emit a position update manually?
-                 onPositionUpdate?(savedPosition, track.duration ?? 0, 0)
+                // Auto Play Logic
+                if GeneralStorage.shared.isAutoplayOnStartEnabled {
+                    print("[OrpheusPlayer] restoreState: Autoplay Enabled. Playing track index \(savedIndex) at position \(savedPosition)")
+                    playTrack(at: savedIndex, reason: .playlistChanged, startPosition: savedPosition > 0 ? savedPosition : nil)
+                } else {
+                    // Start Paused
+                    print("[OrpheusPlayer] restoreState: Autoplay Disabled. Loading track index \(savedIndex) paused.")
+                     onTrackStarted?(track.id, .playlistChanged)
+                     
+                     // If we want to be ready to play at position:
+                     /*
+                     let urlString = track.url
+                     if !urlString.starts(with: "orpheus://bilibili") { // Skip async bili for startup perf?
+                         let asset = AVURLAsset(url: URL(string: urlString)!)
+                         let item = AVPlayerItem(asset: asset)
+                         player.replaceCurrentItem(with: item)
+                         player.seek(to: CMTime(seconds: savedPosition, preferredTimescale: 1000))
+                         // player is paused by default
+                     }
+                     */
+                     // Simple approach: restore indices, let UI show it. 
+                     // Updating position might be tricky if player is empty.
+                     // We can emit a position update manually?
+                     onPositionUpdate?(savedPosition, track.duration ?? 0, 0)
+                }
             }
         }
     }

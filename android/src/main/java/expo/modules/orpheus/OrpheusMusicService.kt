@@ -23,6 +23,7 @@ import androidx.media3.session.SessionResult
 import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
+import java.util.concurrent.CopyOnWriteArrayList
 import expo.modules.orpheus.R
 import expo.modules.orpheus.utils.DownloadUtil
 import expo.modules.orpheus.utils.SleepTimeController
@@ -47,6 +48,10 @@ class OrpheusMusicService : MediaLibraryService() {
 
     lateinit var floatingLyricsManager: FloatingLyricsManager
     private val serviceHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    
+    private var lastTrackFinishedAt: Long = 0
+    private val durationCache = mutableMapOf<String, Long>()
+
     private val lyricsUpdateRunnable = object : Runnable {
         override fun run() {
             player?.let {
@@ -67,7 +72,7 @@ class OrpheusMusicService : MediaLibraryService() {
                 }
             }
 
-        private val listeners = mutableListOf<(OrpheusMusicService) -> Unit>()
+        private val listeners = CopyOnWriteArrayList<(OrpheusMusicService) -> Unit>()
 
         fun addOnServiceReadyListener(listener: (OrpheusMusicService) -> Unit) {
             instance?.let { listener(it) }
@@ -336,15 +341,49 @@ class OrpheusMusicService : MediaLibraryService() {
         }
     }
 
+    interface TrackEventListener {
+        fun onTrackStarted(trackId: String, reason: Int)
+        fun onTrackFinished(trackId: String, finalPosition: Double, duration: Double)
+    }
+
+    private val trackEventListeners = CopyOnWriteArrayList<TrackEventListener>()
+
+    fun addTrackEventListener(listener: TrackEventListener) {
+        trackEventListeners.add(listener)
+    }
+
+    fun removeTrackEventListener(listener: TrackEventListener) {
+        trackEventListeners.remove(listener)
+    }
+
     @OptIn(UnstableApi::class)
     private fun sendTrackStartEvent(mediaItem: androidx.media3.common.MediaItem?, reason: Int) {
         if (mediaItem == null) return
         
+        // Notify local listeners
+        trackEventListeners.forEach { it.onTrackStarted(mediaItem.mediaId, reason) }
+
         try {
             val intent = Intent(this, OrpheusHeadlessTaskService::class.java)
             intent.putExtra("eventName", "onTrackStarted")
             intent.putExtra("trackId", mediaItem.mediaId)
             intent.putExtra("reason", reason)
+            startService(intent)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    private fun sendTrackFinishedEvent(trackId: String, finalPosition: Double, duration: Double) {
+        // Notify local listeners
+        trackEventListeners.forEach { it.onTrackFinished(trackId, finalPosition, duration) }
+
+        try {
+            val intent = Intent(this, OrpheusHeadlessTaskService::class.java)
+            intent.putExtra("eventName", "onTrackFinished")
+            intent.putExtra("trackId", trackId)
+            intent.putExtra("finalPosition", finalPosition)
+            intent.putExtra("duration", duration)
             startService(intent)
         } catch (e: Exception) {
             e.printStackTrace()
@@ -379,6 +418,39 @@ class OrpheusMusicService : MediaLibraryService() {
 
             override fun onTimelineChanged(timeline: Timeline, reason: Int) {
                 saveCurrentQueue()
+                val player = player ?: return
+                val currentItem = player.currentMediaItem ?: return
+                val duration = player.duration
+                if (duration != C.TIME_UNSET && duration > 0) {
+                     durationCache[currentItem.mediaId] = duration
+                }
+            }
+
+            override fun onPositionDiscontinuity(
+                oldPosition: Player.PositionInfo,
+                newPosition: Player.PositionInfo,
+                reason: Int
+            ) {
+                val isAutoTransition = reason == Player.DISCONTINUITY_REASON_AUTO_TRANSITION
+                val isIndexChanged = oldPosition.mediaItemIndex != newPosition.mediaItemIndex
+                val lastMediaItem = oldPosition.mediaItem ?: return
+                val currentTime = System.currentTimeMillis()
+                
+                // Debounce
+                if ((currentTime - lastTrackFinishedAt) < 200) {
+                    return
+                }
+
+                if (isAutoTransition || isIndexChanged) {
+                    val duration = durationCache[lastMediaItem.mediaId] ?: return
+                    lastTrackFinishedAt = currentTime
+                    
+                    sendTrackFinishedEvent(
+                        lastMediaItem.mediaId,
+                        oldPosition.positionMs / 1000.0,
+                        duration / 1000.0
+                    )
+                }
             }
         })
     }

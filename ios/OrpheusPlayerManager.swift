@@ -201,6 +201,7 @@ class OrpheusPlayerManager: NSObject {
     // MARK: - Playback Control
     
     func play() {
+        let currentIndex = queueManager.getCurrentIndex()
         if player.currentItem == nil && currentIndex >= 0 {
 
              playTrack(at: currentIndex, reason: .auto)

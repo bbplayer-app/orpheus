@@ -1,4 +1,5 @@
 import ExpoModulesCore
+import MMKV
 
 public class ExpoOrpheusModule: Module {
     
@@ -58,7 +59,6 @@ public class ExpoOrpheusModule: Module {
         
 
         Events(
-        Events(
             "onPlaybackStateChanged",
             "onPlayerError",
             "onPositionUpdate",
@@ -69,6 +69,7 @@ public class ExpoOrpheusModule: Module {
         )
         
         OnCreate {
+            MMKV.initialize(rootDir: nil)
             self.setupEventListeners()
         }
 

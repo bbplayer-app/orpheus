@@ -5,6 +5,7 @@ class OrpheusQueueManager {
     private var backingQueue: [Track] = []
     private var shuffleIndices: [Int]?
     private var currentIndex: Int = -1 // This is ALWAYS the index in backingQueue
+    private var pendingShuffleInit: Bool = false
     
     // MARK: - Getters
     
@@ -40,23 +41,33 @@ class OrpheusQueueManager {
             if startFromIndex >= 0 && startFromIndex < tracks.count {
                 currentIndex = startFromIndex
             } else {
-                 currentIndex = shuffleIndices?.first ?? -1 // Start with first in shuffle if no specific start
-                 if currentIndex == -1 && !tracks.isEmpty { currentIndex = 0 }
+            currentIndex = shuffleIndices?.first ?? -1 // Start with first in shuffle if no specific start
+                 if currentIndex == -1 && !tracks.isEmpty { currentIndex = tracks.indices.contains(0) ? shuffleIndices?.first ?? 0 : 0 }
             }
             
         } else {
             shuffleIndices = nil
-            currentIndex = startFromIndex
+            pendingShuffleInit = false
+            if tracks.isEmpty {
+                currentIndex = -1
+            } else if startFromIndex >= 0 && startFromIndex < tracks.count {
+                currentIndex = startFromIndex
+            } else {
+                currentIndex = 0 // Safe default
+            }
         }
     }
     
     func setShuffleMode(_ enabled: Bool) {
         if enabled {
-            if shuffleIndices == nil {
+            if backingQueue.isEmpty {
+                pendingShuffleInit = true
+            } else if shuffleIndices == nil {
                 generateShuffleIndices()
             }
         } else {
             shuffleIndices = nil
+            pendingShuffleInit = false
         }
     }
     
@@ -125,6 +136,11 @@ class OrpheusQueueManager {
         guard backingIndex >= 0 && backingIndex < backingQueue.count else { return false }
         
         let wasCurrent = (backingIndex == currentIndex)
+        var removedShufflePos: Int? = nil
+        
+        if let indices = shuffleIndices, let pos = indices.firstIndex(of: backingIndex) {
+            removedShufflePos = pos
+        }
         
         backingQueue.remove(at: backingIndex)
         
@@ -147,9 +163,13 @@ class OrpheusQueueManager {
                  if currentIndex >= backingQueue.count {
                      currentIndex = 0 
                  }
-                 if let indices = shuffleIndices {
+                 
+                 // If shuffled, pick the next one in shuffle order
+                 if let indices = shuffleIndices, let removedPos = removedShufflePos {
                      if !indices.isEmpty {
-                          currentIndex = indices[0]
+                         // We want the item that is now at removedPos (or wrap)
+                         let nextPos = removedPos < indices.count ? removedPos : 0
+                         currentIndex = indices[nextPos]
                      } else {
                          currentIndex = -1
                      }
@@ -164,7 +184,10 @@ class OrpheusQueueManager {
         let startIndex = backingQueue.count
         backingQueue.append(contentsOf: tracks)
         
-        if var indices = shuffleIndices {
+        if pendingShuffleInit {
+            generateShuffleIndices()
+            pendingShuffleInit = false
+        } else if var indices = shuffleIndices {
             // Add new items to end of shuffle order (standard "Add to Queue" behavior)
              let newIndices = (startIndex..<(startIndex + tracks.count))
              indices.append(contentsOf: newIndices)

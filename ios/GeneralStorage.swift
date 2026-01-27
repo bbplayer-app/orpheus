@@ -24,7 +24,7 @@ class GeneralStorage {
     }
     
     var isLoudnessNormalizationEnabled: Bool {
-        get { return mmkv?.bool(forKey: KEY_LOUDNESS_ENABLED, defaultValue: false) ?? false }
+        get { return mmkv?.bool(forKey: KEY_LOUDNESS_ENABLED, defaultValue: true) ?? true }
         set { mmkv?.set(newValue, forKey: KEY_LOUDNESS_ENABLED) }
     }
     
@@ -37,8 +37,11 @@ class GeneralStorage {
     
     func saveQueue(_ queue: [Track]) {
         let dicts = queue.map { $0.dictionaryRepresentation }
-        if let data = try? JSONSerialization.data(withJSONObject: dicts, options: []) {
+        do {
+            let data = try JSONSerialization.data(withJSONObject: dicts, options: [])
             mmkv?.set(data, forKey: KEY_SAVED_QUEUE)
+        } catch {
+             print("Failed to save queue: \(error)")
         }
     }
     

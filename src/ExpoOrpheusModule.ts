@@ -51,7 +51,7 @@ export type OrpheusEvents = {
   onPlaybackStateChanged(event: { state: PlaybackState }): void;
   onPlaybackStateChanged(event: { state: PlaybackState }): void;
   onHeadlessEvent(event: OrpheusHeadlessEvent): void;
-  onPlayerError?: (event: PlaybackErrorEvent) => void;
+  onPlayerError(event: PlaybackErrorEvent): void;
   onPositionUpdate(event: {
     position: number;
     duration: number;

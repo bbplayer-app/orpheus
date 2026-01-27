@@ -43,6 +43,11 @@ export default function OrpheusTestScreen() {
       setPlaybackState(event.state);
     });
 
+    const subTrackStart = Orpheus.addListener('onTrackStarted', async (event) => {
+      console.log('Track Started:', event);
+      console.log(`Track Started: ${event.trackId} (Reason: ${TransitionReason[event.reason]})`);
+    });
+
     const subTrackFinish = Orpheus.addListener('onTrackFinished', (event) => {
       console.log('Track Finished:', event);
       setLastEventLog(`Track Finished: ${event.trackId}`);

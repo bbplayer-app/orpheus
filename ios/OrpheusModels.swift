@@ -18,6 +18,17 @@ struct Track: Record {
   
   @Field
   var duration: Double?
+  
+  @Field
+  var loudness: LoudnessInfo?
+}
+
+struct LoudnessInfo: Record {
+  @Field
+  var measured_i: Double = 0.0
+  
+  @Field
+  var target_i: Double = 0.0
 }
 
 extension Track {
@@ -30,6 +41,12 @@ extension Track {
         if let artist = artist { dict["artist"] = artist }
         if let artwork = artwork { dict["artwork"] = artwork }
         if let duration = duration { dict["duration"] = duration }
+        if let loudness = loudness {
+            dict["loudness"] = [
+                "measured_i": loudness.measured_i,
+                "target_i": loudness.target_i
+            ]
+        }
         return dict
     }
     
@@ -44,6 +61,13 @@ extension Track {
         self.artist = dictionary["artist"] as? String
         self.artwork = dictionary["artwork"] as? String
         self.duration = dictionary["duration"] as? Double
+        
+        if let loudnessDict = dictionary["loudness"] as? [String: Any] {
+            let info = LoudnessInfo()
+            info.measured_i = loudnessDict["measured_i"] as? Double ?? 0.0
+            info.target_i = loudnessDict["target_i"] as? Double ?? 0.0
+            self.loudness = info
+        }
     }
 }
 

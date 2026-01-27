@@ -27,10 +27,13 @@ export interface Track {
   artist?: string;
   artwork?: string;
   duration?: number;
+  loudness?: {
+    measured_i: number;
+    target_i: number;
+  }
 }
 
-export type AndroidPlaybackErrorEvent = {
-  platform: "android";
+export type PlaybackErrorEvent = {
   errorCode: number; 
   errorCodeName: string | null; 
   timestamp: string; 
@@ -40,23 +43,15 @@ export type AndroidPlaybackErrorEvent = {
   rootCauseMessage: string;
 };
 
-export type IosPlaybackErrorEvent = {
-  platform: "ios";
-  error: string;
-};
-
-export type PlaybackErrorEvent = AndroidPlaybackErrorEvent | IosPlaybackErrorEvent;
-
 export type OrpheusEvents = {
   onPlaybackStateChanged(event: { state: PlaybackState }): void;
-  onTrackStarted(event: { trackId: string; reason: number }): void;
+  onTrackStarted(event: { trackId: string; reason: TransitionReason }): void;
   onTrackFinished(event: {
     trackId: string;
     finalPosition: number;
     duration: number;
   }): void;
-  onHeadlessEvent(event: OrpheusHeadlessEvent): void;
-  onPlayerError(event: PlaybackErrorEvent): void;
+  onPlayerError?: (event: PlaybackErrorEvent) => void;
   onPositionUpdate(event: {
     position: number;
     duration: number;
@@ -66,23 +61,6 @@ export type OrpheusEvents = {
   onDownloadUpdated(event: DownloadTask): void;
   onPlaybackSpeedChanged(event: { speed: number }): void;
 };
-
-export type OrpheusHeadlessTrackStartedEvent = {
-  eventName: "onTrackStarted";
-  trackId: string;
-  reason: number;
-};
-
-export type OrpheusHeadlessTrackFinishedEvent = {
-  eventName: "onTrackFinished";
-  trackId: string;
-  finalPosition: number;
-  duration: number;
-};
-
-export type OrpheusHeadlessEvent = 
-  | OrpheusHeadlessTrackStartedEvent
-  | OrpheusHeadlessTrackFinishedEvent;
 
 declare class OrpheusModule extends NativeModule<OrpheusEvents> {
   

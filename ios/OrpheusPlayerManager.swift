@@ -5,9 +5,9 @@ import MediaPlayer
 class OrpheusPlayerManager: NSObject {
     static let shared = OrpheusPlayerManager()
     
-    private var player: AVPlayer!
-    private var queue: [Track] = []
-    private var currentIndex: Int = -1
+    private let player: AVPlayer
+    private let queueManager = OrpheusQueueManager()
+
     
     var repeatMode: RepeatMode = .off
     var shuffleMode: Bool = false
@@ -19,19 +19,19 @@ class OrpheusPlayerManager: NSObject {
     private var sleepTimer: Timer?
     private var sleepTimerEndTime: Date?
     
-    // Original playlist for shuffle implementation
-    private var originalQueue: [Track] = []
+
     
-    // Events
+
     var onPlaybackStateChanged: ((PlaybackState) -> Void)?
     var onTrackStarted: ((String, TransitionReason) -> Void)?
+    var onTrackFinished: ((String, Double, Double) -> Void)?
     var onPositionUpdate: ((Double, Double, Double) -> Void)?
     var onIsPlayingChanged: ((Bool) -> Void)?
     var onPlayerError: ((String) -> Void)?
     
     override init() {
+        self.player = AVPlayer()
         super.init()
-        player = AVPlayer()
         setupPlayerObservers()
         setupAudioSession()
         setupRemoteCommands()
@@ -77,6 +77,10 @@ class OrpheusPlayerManager: NSObject {
     }
     
     private func handleAutoAdvance() {
+        if let current = queueManager.getCurrentTrack(), let duration = player.currentItem?.duration.seconds {
+             onTrackFinished?(current.id, duration, duration)
+        }
+
         if repeatMode == .track {
             player.seek(to: .zero)
             player.play()
@@ -89,138 +93,103 @@ class OrpheusPlayerManager: NSObject {
     // MARK: - Queue Management
     
     func getQueue() -> [Track] {
-        return queue
+        return queueManager.getQueue()
     }
     
     func getCurrentTrack() -> Track? {
-        guard currentIndex >= 0 && currentIndex < queue.count else { return nil }
-        return queue[currentIndex]
+        return queueManager.getCurrentTrack()
     }
     
     func getTrack(at index: Int) -> Track? {
+        let queue = queueManager.getQueue()
         guard index >= 0 && index < queue.count else { return nil }
         return queue[index]
     }
     
     func getCurrentIndex() -> Int {
-        return currentIndex
+        return queueManager.getCurrentIndex()
     }
     
     func setQueue(_ tracks: [Track], startIndex: Int) {
-        // Reset state
-        originalQueue = tracks
-        queue = tracks
+        queueManager.setQueue(tracks, startFromIndex: startIndex, inputShuffleMode: shuffleMode)
         
-        if shuffleMode {
-            shuffleQueue(keepCurrentIndex: startIndex)
-        } else {
-            currentIndex = startIndex
-        }
-        
-        if currentIndex >= 0 && currentIndex < queue.count {
-            playTrack(at: currentIndex, reason: .playlistChanged)
+        let currentIndex = queueManager.getCurrentIndex()
+        if currentIndex >= 0 {
+             playTrack(at: currentIndex, reason: .playlistChanged)
         }
         
         saveState()
     }
     
+    private func getQueueCount() -> Int {
+        return queueManager.getQueueCount()
+    }
+    
     func removeTrack(at index: Int) {
-        guard index >= 0 && index < queue.count else { return }
+        // index is backing index
+        let wasCurrent = queueManager.removeTrack(at: index)
         
-        let removedTrack = queue.remove(at: index)
-        originalQueue.removeAll { $0.id == removedTrack.id } // Also remove from original
-        
-        if index < currentIndex {
-            currentIndex -= 1
-        } else if index == currentIndex {
-            // Removing currently playing track
-            if queue.isEmpty {
-                // Stopped
-                player.pause()
-                player.replaceCurrentItem(with: nil)
-                currentIndex = -1
-                onPlaybackStateChanged?(.ended)
-                onIsPlayingChanged?(false) // Force update
-                notifyPositionUpdate() 
-            } else {
-                // Play next valid or current (which is now new track at this index)
-                // If we removed last item, currentIndex is now out of bounds
-                if currentIndex >= queue.count {
-                    currentIndex = 0 // loop or stop? Android keeps playing? 
-                    // Usually if you remove current, it skips to next.
-                    // If last was removed, maybe loop to 0?
-                }
-                playTrack(at: currentIndex, reason: .playlistChanged) // reason?
-            }
+        if wasCurrent {
+             if queueManager.getQueueCount() == 0 {
+                  stopPlayback()
+             } else {
+                  // Play new current or stop if none
+                  if let current = queueManager.getCurrentTrack() {
+
+                      playTrack(at: queueManager.getCurrentIndex(), reason: .playlistChanged)
+                  } else {
+                      stopPlayback()
+                  }
+             }
         }
+        
+        saveState()
     }
     
     func clearQueue() {
-        queue.removeAll()
-        originalQueue.removeAll()
-        currentIndex = -1
+        queueManager.clear()
+        stopPlayback()
+        updateNowPlayingInfo()
+        saveState()
+    }
+    
+    private func stopPlayback() {
         player.pause()
         player.replaceCurrentItem(with: nil)
         onPlaybackStateChanged?(.idle)
         onIsPlayingChanged?(false)
-        updateNowPlayingInfo()
+        notifyPositionUpdate()
     }
     
     func addToNext(track: Track) {
-        if queue.isEmpty {
-            addToEnd(tracks: [track], startFromId: nil, clearQueue: false)
-            return
-        }
-        
-        let insertIndex = currentIndex + 1
-        queue.insert(track, at: insertIndex)
-        originalQueue.append(track)
+        queueManager.insertNext(track: track)
+        saveState()
     }
-    
-    // ... (addToEnd implementation) ...
     
     func addToEnd(tracks: [Track], startFromId: String?, clearQueue: Bool) {
         if clearQueue {
-            setQueue(tracks, startIndex: 0)
+            // Logic similar to setQueue
+            var startIndex = 0
             if let startId = startFromId, let index = tracks.firstIndex(where: { $0.id == startId }) {
-                setQueue(tracks, startIndex: index)
+                startIndex = index
             }
+            setQueue(tracks, startIndex: startIndex)
         } else {
-            originalQueue.append(contentsOf: tracks)
-            queue.append(contentsOf: tracks)
-        }
-        
-        if !clearQueue, let startId = startFromId {
-            // Find in current queue (which might be shuffled)
-            if let index = queue.firstIndex(where: { $0.id == startId }) {
+            // Append
+            queueManager.append(tracks: tracks)
+            
+            if let startId = startFromId, let index = queueManager.getQueue().firstIndex(where: { $0.id == startId }) {
+                // If startFromId is present, play the specified track
                 playTrack(at: index, reason: .playlistChanged)
             }
+            saveState()
         }
     }
     
     func setExecuteShuffleMode(_ enabled: Bool) {
         guard shuffleMode != enabled else { return }
         shuffleMode = enabled
-        
-        if enabled {
-            // Turning shuffle ON
-            shuffleQueue(keepCurrentIndex: currentIndex)
-        } else {
-            // Turning shuffle OFF
-            // We need to find current track in originalQueue and set currentIndex there
-            if currentIndex >= 0 && currentIndex < queue.count {
-                let currentTrack = queue[currentIndex]
-                queue = originalQueue
-                if let newIndex = queue.firstIndex(where: { $0.id == currentTrack.id }) {
-                    currentIndex = newIndex
-                } else {
-                    currentIndex = 0 // Should not happen
-                }
-            } else {
-                queue = originalQueue
-                currentIndex = -1
-            }
-        }
+        queueManager.setShuffleMode(enabled)
         saveState()
     }
     
@@ -229,28 +198,10 @@ class OrpheusPlayerManager: NSObject {
         saveState()
     }
     
-    private func shuffleQueue(keepCurrentIndex: Int) {
-        guard !originalQueue.isEmpty else { return }
-        
-        if keepCurrentIndex >= 0 && keepCurrentIndex < originalQueue.count {
-            let currentTrack = originalQueue[keepCurrentIndex] // Note: this index is relative to originalQueue if called from setQueue(shuffle=true)
-            // Wait, if we are calling this from setQueue, `queue` might already be set to `tracks`.
-            // Let's rely on `originalQueue` as source of truth.
-            
-            var remaining = originalQueue.filter { $0.id != currentTrack.id }
-            remaining.shuffle()
-            
-            queue = [currentTrack] + remaining
-            currentIndex = 0
-        } else {
-            queue = originalQueue.shuffled()
-            currentIndex = -1
-        }
-    }
-    
     // MARK: - Playback Control
     
     func play() {
+        let currentIndex = queueManager.getCurrentIndex()
         if player.currentItem == nil && currentIndex >= 0 {
 
              playTrack(at: currentIndex, reason: .auto)
@@ -273,43 +224,28 @@ class OrpheusPlayerManager: NSObject {
     }
     
     func skipToNext(reason: TransitionReason) {
-        if queue.isEmpty { return }
+        let count = queueManager.getQueueCount()
+        if count == 0 { return }
         
-        // If Repeat One, usually 'Next' button forces next track anyway, ignoring Repeat One.
-        // Auto-advance respects Repeat One.
-        // `skipToNext` is usually manual action. `handleAutoAdvance` calls this with reason=.auto
-        
-        var nextIndex = currentIndex + 1
-        
-        // Handle Cycle
-        if nextIndex >= queue.count {
-            if repeatMode == .queue || repeatMode == .track { // Repeat Track usually circles in playlist too if manually skipped?
-                 nextIndex = 0
-            } else {
-                // End of queue
-                onPlaybackStateChanged?(.ended)
-                return
-            }
+        guard let nextIndex = queueManager.getNextIndex(repeatMode: repeatMode) else {
+             // End of queue
+             onPlaybackStateChanged?(.ended)
+             return
         }
         
         playTrack(at: nextIndex, reason: reason)
     }
     
     func skipToPrevious() {
-        // If playing > 3 seconds, restart current track? Standard iOS behavior.
+        // 跟随 Media3 逻辑（或许是行业标准？），当播放超过 3s，「上一曲」的语义变成「重新播放」
         if player.currentTime().seconds > 3.0 {
             player.seek(to: CMTime.zero)
             return
         }
         
-        var prevIndex = currentIndex - 1
-        if prevIndex < 0 {
-             if repeatMode == .queue || repeatMode == .track {
-                 prevIndex = queue.count - 1
-             } else {
-                 player.seek(to: CMTime.zero)
-                 return
-             }
+        guard let prevIndex = queueManager.getPreviousIndex(repeatMode: repeatMode) else {
+             player.seek(to: CMTime.zero)
+             return
         }
         
         playTrack(at: prevIndex, reason: .seek)
@@ -323,34 +259,39 @@ class OrpheusPlayerManager: NSObject {
     // MARK: - Track Loading
     
     private func playTrack(at index: Int, reason: TransitionReason, startPosition: Double? = nil) {
-        guard index >= 0 && index < queue.count else {
+        // Handle previous track finish (for manual skips)
+        if reason != .auto, let oldTrack = queueManager.getCurrentTrack() {
+             let position = player.currentTime().seconds
+             let duration = player.currentItem?.duration.seconds ?? 0
+             // Only emit if we actually have a duration (implying we were playing something)
+             // or just emit whatever state we have.
+             onTrackFinished?(oldTrack.id, position, duration)
+        }
 
+        // Index is BACKING index
+        queueManager.skipTo(backingIndex: index)
+        guard let track = queueManager.getCurrentTrack() else {
             return
         }
         
         // Optimistic update
-        self.currentIndex = index
-        let track = queue[index]
 
+        
         onTrackStarted?(track.id, reason)
         saveState()
         
         let urlString = track.url
-
         
         // Check for local download first
         if let localUrl = OrpheusDownloadManager.shared.getDownloadedFileUrl(id: track.id) {
-
              // Use local file
              loadAvPlayerItem(url: localUrl.absoluteString, headers: nil, startPosition: startPosition)
              return
         }
         
         if urlString.starts(with: "orpheus://bilibili") {
-
             resolveAndPlayBilibili(url: urlString, startPosition: startPosition)
         } else {
-
             loadAvPlayerItem(url: urlString, headers: nil, startPosition: startPosition)
         }
     }
@@ -456,11 +397,8 @@ class OrpheusPlayerManager: NSObject {
         
         onPositionUpdate?(currentTime, duration, buffered)
         
-        // Update lock screen progress
-        // Only update occasionally or on state change to avoid spamming? 
-        // Actually MPNowPlayingInfoCenter handles 'elapsedPlaybackTime' so we don't need to push every split second 
-        // unless status changes or seek happens.
-        // However, we should update it when rate changes.
+        // Update lock screen progress occasionally or on state change
+        // MPNowPlayingInfoCenter handles 'elapsedPlaybackTime' automatically so we mainly update on rate/status changes.
     }
     
     private func notifyPlaybackState() {
@@ -512,9 +450,7 @@ class OrpheusPlayerManager: NSObject {
         
         if type == .began {
             // Audio interrupted (phone call, etc.), pause player
-            // Player usually pauses itself? but we should update UI state?
-            // AVPlayer pauses automatically on interruption usually if not configured otherwise.
-            // But we might want to manually pause to ensure state is synced.
+
              pause()
         } else if type == .ended {
             if let optionsValue = userInfo[AVAudioSessionInterruptionOptionKey] as? UInt {
@@ -576,23 +512,20 @@ class OrpheusPlayerManager: NSObject {
     }
     
     private func updateNowPlayingInfo() {
-        guard currentIndex >= 0 && currentIndex < queue.count else {
+        guard let track = getCurrentTrack() else {
             MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
             return
         }
         
         // Ensure audio session is active for lock screen controls to appear
-        // Sometimes it gets deactivated on pause or background switch
-        
-        let track = queue[currentIndex]
         
         var info: [String: Any] = [
             MPMediaItemPropertyTitle: track.title ?? "Unknown Title",
             MPMediaItemPropertyArtist: track.artist ?? "Unknown Artist",
             MPNowPlayingInfoPropertyElapsedPlaybackTime: player.currentTime().seconds,
             MPNowPlayingInfoPropertyPlaybackRate: player.rate,
-            MPNowPlayingInfoPropertyPlaybackQueueIndex: currentIndex,
-            MPNowPlayingInfoPropertyPlaybackQueueCount: queue.count
+            MPNowPlayingInfoPropertyPlaybackQueueIndex: queueManager.getCurrentIndex(),
+            MPNowPlayingInfoPropertyPlaybackQueueCount: queueManager.getQueueCount()
         ]
         
         if let duration = track.duration {
@@ -606,10 +539,8 @@ class OrpheusPlayerManager: NSObject {
             downloadImage(url: artworkUrl) { image in
                 guard let image = image else { return }
                 
-                // Re-fetch because concurrent updates might have happened
+                // Verify track hasn't changed before updating artwork
                 if var currentInfo = MPNowPlayingInfoCenter.default().nowPlayingInfo {
-                    // Check if we are still on the same track roughly (title check or id check if we stored it)
-                    // Simple check: Title matches
                     if currentInfo[MPMediaItemPropertyTitle] as? String == track.title {
                          let artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
                          currentInfo[MPMediaItemPropertyArtwork] = artwork
@@ -628,7 +559,7 @@ class OrpheusPlayerManager: NSObject {
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
     }
     
-    // Simple image downloader helper
+
     private func downloadImage(url: URL, completion: @escaping (UIImage?) -> Void) {
         URLSession.shared.dataTask(with: url) { data, _, _ in
             guard let data = data, let image = UIImage(data: data) else {
@@ -642,7 +573,7 @@ class OrpheusPlayerManager: NSObject {
     }
     
     func skipTo(index: Int) {
-        guard index >= 0 && index < queue.count else { return }
+        // index is backing index from UI
         playTrack(at: index, reason: .seek)
     }
     
@@ -702,10 +633,10 @@ class OrpheusPlayerManager: NSObject {
     // MARK: - Persistence
     
     private func saveState() {
-        GeneralStorage.shared.saveQueue(queue)
+        GeneralStorage.shared.saveQueue(queueManager.getQueue())
         
         GeneralStorage.shared.savePosition(
-            index: currentIndex,
+            index: queueManager.getCurrentIndex(),
             positionSec: player.currentTime().seconds
         )
         
@@ -715,7 +646,7 @@ class OrpheusPlayerManager: NSObject {
     
     private func savePositionState() {
         let seconds = player.currentTime().seconds
-        GeneralStorage.shared.savePosition(index: currentIndex, positionSec: seconds)
+        GeneralStorage.shared.savePosition(index: queueManager.getCurrentIndex(), positionSec: seconds)
     }
 
     private func restoreState() {
@@ -727,57 +658,32 @@ class OrpheusPlayerManager: NSObject {
         
         // Restore Queue
         let restoredQueue = GeneralStorage.shared.getSavedQueue()
-        if !restoredQueue.isEmpty {
-            originalQueue = restoredQueue
-            queue = restoredQueue
-        }
         
-        // Restore Index and Position
+        // Restore Index
         let savedIndex = GeneralStorage.shared.getSavedIndex()
         var savedPosition = 0.0
         if GeneralStorage.shared.isRestoreEnabled {
             savedPosition = GeneralStorage.shared.getSavedPosition()
         }
         
-        if !queue.isEmpty {
-            self.currentIndex = savedIndex
-            // Don't auto play, just prepare
-            if savedIndex >= 0 && savedIndex < queue.count {
-                // Seek to position, but don't play yet?
-                // We create a player item but don't play
-                let track = queue[savedIndex]
-                
-                // We need to load the item but PAUSED
-                // Re-use logic but avoid .play()
-                // Or just set currentIndex and wait for user to press play?
-                // User expects "Resume" capability.
-                // We can load the item partially?
-                // Let's try to just set state so UI reflects it.
-                // Sending 'onTrackStarted' might be needed for UI to update properly.
-                // We won't actually load the AVPlayerItem until user hits play to save resources/bandwidth on startup?
-                // OR we load it paused.
-                
-                // Let's load it paused.
-                // Cannot call playTrack -> it plays.
-                // We manually set up.
-                
-                // Auto Play Logic
-                if GeneralStorage.shared.isAutoplayOnStartEnabled {
-
-                    playTrack(at: savedIndex, reason: .playlistChanged, startPosition: savedPosition > 0 ? savedPosition : nil)
-                } else {
-                    // Start Paused
-
-                     onTrackStarted?(track.id, .playlistChanged)
-                     
-                     // If we want to be ready to play at position:
-
-                     // Simple approach: restore indices, let UI show it. 
-                     // Updating position might be tricky if player is empty.
-                     // We can emit a position update manually?
-                     onPositionUpdate?(savedPosition, track.duration ?? 0, 0)
-                }
-            }
+        if !restoredQueue.isEmpty {
+             // Initialize queue manager
+             queueManager.setQueue(restoredQueue, startFromIndex: savedIndex, inputShuffleMode: shuffleMode)
+             
+             // Now handle playback state restoration
+             if savedIndex >= 0 && savedIndex < restoredQueue.count {
+                 if GeneralStorage.shared.isAutoplayOnStartEnabled {
+                     playTrack(at: savedIndex, reason: .playlistChanged, startPosition: savedPosition > 0 ? savedPosition : nil)
+                 } else {
+                     // Prepare but paused
+                     if let track = queueManager.getCurrentTrack() {
+                         onTrackStarted?(track.id, .playlistChanged)
+                         // Emit position update so UI is consistent
+                         onPositionUpdate?(savedPosition, track.duration ?? 0, 0)
+                         // Preparing UI state without creating AVPlayerItem yet
+                     }
+                 }
+             }
         }
     }
 }

@@ -1,15 +1,16 @@
 import Foundation
 import ExpoModulesCore
+import MMKV
 
 class OrpheusDownloadManager: NSObject, URLSessionDownloadDelegate {
     static let shared = OrpheusDownloadManager()
+    
+    private let stateQueue = DispatchQueue(label: "com.orpheus.download.state")
     
     private var urlSession: URLSession!
     private var downloadTasks: [String: DownloadState] = [:] // Map taskID/url to state
     private var activeTasks: [String: URLSessionDownloadTask] = [:] // Map ID to task
     private var trackMap: [String: Track] = [:] // Map ID to Track metadata
-    
-    // Events
     var onDownloadUpdated: ((DownloadTask) -> Void)?
     
     override init() {
@@ -47,8 +48,7 @@ class OrpheusDownloadManager: NSObject, URLSessionDownloadDelegate {
                 case .success(let realUrl):
                     self?.startDownload(url: realUrl, track: track)
                 case .failure(let error):
-
-                    // Update state to failed
+                    // No ID available if we failed before starting? Actually track.id is there.
                     self?.notifyUpdate(id: track.id, state: .failed, track: track)
                 }
             }
@@ -69,8 +69,34 @@ class OrpheusDownloadManager: NSObject, URLSessionDownloadDelegate {
     }
     
     private func startDownload(url: String, track: Track) {
-
         guard let nsUrl = URL(string: url) else { return }
+        
+        stateQueue.sync {
+            var request = URLRequest(url: nsUrl)
+            if url.contains("bilivideo.com") {
+                 request.setValue("https://www.bilibili.com/", forHTTPHeaderField: "Referer")
+                 request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36", forHTTPHeaderField: "User-Agent")
+            }
+            
+            let task = urlSession.downloadTask(with: request)
+            task.taskDescription = track.id
+            
+            trackMap[track.id] = track
+            activeTasks[track.id] = task
+            downloadTasks[track.id] = .downloading
+            
+            task.resume()
+            
+            saveTasksLocked()
+        }
+        
+        notifyUpdate(id: track.id, state: .downloading, track: track)
+    }
+    
+    // Internal version of startDownload used by restoreTasks within lock
+    private func startDownloadLocked(url: String, track: Track) {
+        guard let nsUrl = URL(string: url) else { return }
+        
         var request = URLRequest(url: nsUrl)
         if url.contains("bilivideo.com") {
              request.setValue("https://www.bilibili.com/", forHTTPHeaderField: "Referer")
@@ -85,60 +111,56 @@ class OrpheusDownloadManager: NSObject, URLSessionDownloadDelegate {
         downloadTasks[track.id] = .downloading
         
         task.resume()
+        saveTasksLocked()
         
-        saveTasks() // Save state
-        notifyUpdate(id: track.id, state: .downloading, track: track)
+        // Notify outside lock? Or via async
+        DispatchQueue.main.async {
+            self.notifyUpdate(id: track.id, state: .downloading, track: track)
+        }
     }
     
     func removeDownload(id: String) {
-        if let task = activeTasks[id] {
-            task.cancel()
-            activeTasks.removeValue(forKey: id)
+        stateQueue.sync {
+            if let task = activeTasks[id] {
+                task.cancel()
+                activeTasks.removeValue(forKey: id)
+            }
+            
+            let fileManager = FileManager.default
+            let docs = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
+            let dest = docs.appendingPathComponent("downloads/\(id).mp4")
+            try? fileManager.removeItem(at: dest)
+            
+            downloadTasks.removeValue(forKey: id)
+            trackMap.removeValue(forKey: id)
+            
+            saveTasksLocked()
         }
-        
-        // Remove file
-        let fileManager = FileManager.default
-        let docs = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
-        let dest = docs.appendingPathComponent("downloads/\(id).mp4")
-        try? fileManager.removeItem(at: dest)
-        
-        downloadTasks.removeValue(forKey: id)
-        trackMap.removeValue(forKey: id)
-        
-        saveTasks()
         notifyUpdate(id: id, state: .removing, track: nil)
     }
     
     func removeAllDownloads() {
-        for (_, task) in activeTasks {
-            task.cancel()
+        stateQueue.sync {
+            for (_, task) in activeTasks {
+                task.cancel()
+            }
+            activeTasks.removeAll()
+            
+            let fileManager = FileManager.default
+            let docs = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
+            let downloadsDir = docs.appendingPathComponent("downloads")
+            try? fileManager.removeItem(at: downloadsDir)
+            
+            downloadTasks.removeAll()
+            trackMap.removeAll()
+            
+            saveTasksLocked()
         }
-        activeTasks.removeAll()
-        
-        let fileManager = FileManager.default
-        let docs = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
-        let downloadsDir = docs.appendingPathComponent("downloads")
-        try? fileManager.removeItem(at: downloadsDir)
-        
-        downloadTasks.removeAll()
-        trackMap.removeAll()
-        
-        saveTasks()
-        // Notify? Or just let caller know
     }
     
     // MARK: - Persistence
     
-    private func getTasksJsulUrl() -> URL {
-        let fileManager = FileManager.default
-        let docs = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
-        return docs.appendingPathComponent("download_tasks.json")
-    }
-    
-    private struct SavedLoudness: Codable {
-        let measured_i: Double
-        let target_i: Double
-    }
+    private let KEY_SAVED_TASKS = "saved_download_tasks"
     
     private struct SavedTrack: Codable {
         let id: String
@@ -147,29 +169,22 @@ class OrpheusDownloadManager: NSObject, URLSessionDownloadDelegate {
         let artist: String?
         let artwork: String?
         let duration: Double?
-        let loudness: SavedLoudness?
     }
     
     private struct PersistedTask: Codable {
         let id: String
-        let state: Int // Raw value of DownloadState
+        let state: Int
         let track: SavedTrack
     }
     
-    // Helpers to convert
     private func toSavedTrack(_ track: Track) -> SavedTrack {
-        var l: SavedLoudness? = nil
-        if let info = track.loudness {
-            l = SavedLoudness(measured_i: info.measured_i, target_i: info.target_i)
-        }
         return SavedTrack(
             id: track.id,
             url: track.url,
             title: track.title,
             artist: track.artist,
             artwork: track.artwork,
-            duration: track.duration,
-            loudness: l
+            duration: track.duration
         )
     }
     
@@ -181,59 +196,88 @@ class OrpheusDownloadManager: NSObject, URLSessionDownloadDelegate {
         t.artist = saved.artist
         t.artwork = saved.artwork
         t.duration = saved.duration
-        if let l = saved.loudness {
-            let info = LoudnessInfo()
-            info.measured_i = l.measured_i
-            info.target_i = l.target_i
-            t.loudness = info
-        }
         return t
     }
     
     private func saveTasks() {
+        stateQueue.sync {
+            saveTasksLocked()
+        }
+    }
+    
+    private func saveTasksLocked() {
         let tasksToSave = trackMap.map { (id, track) -> PersistedTask in
             let state = downloadTasks[id] ?? .queued
             return PersistedTask(id: id, state: state.rawValue, track: toSavedTrack(track))
         }
         
-        do {
-            let data = try JSONEncoder().encode(tasksToSave)
-            try data.write(to: getTasksJsulUrl())
-        } catch {
-
+        if let data = try? JSONEncoder().encode(tasksToSave) {
+            MMKV.default()?.set(data, forKey: KEY_SAVED_TASKS)
         }
     }
     
     private func restoreTasks() {
-        do {
-            let data = try Data(contentsOf: getTasksJsulUrl())
-            let persisted = try JSONDecoder().decode([PersistedTask].self, from: data)
+        guard let data = MMKV.default()?.data(forKey: KEY_SAVED_TASKS),
+              let persisted = try? JSONDecoder().decode([PersistedTask].self, from: data) else {
+            return
+        }
             
-            for p in persisted {
-                let track = fromSavedTrack(p.track)
-                trackMap[p.id] = track
-                if let state = DownloadState(rawValue: p.state) {
-                    downloadTasks[p.id] = state
-                }
+        // Initial load (called in init)
+        for p in persisted {
+            let track = fromSavedTrack(p.track)
+            trackMap[p.id] = track
+            if let state = DownloadState(rawValue: p.state) {
+                downloadTasks[p.id] = state
             }
+        }
+        
+        // Check for existing background tasks first
+        urlSession.getAllTasks { [weak self] tasks in
+            guard let self = self else { return }
             
-            // Re-attach to background session tasks if needed is handled by URLSession
-            // But we need to map active tasks back to IDs if session was running.
-            urlSession.getAllTasks { [weak self] tasks in
-                DispatchQueue.main.async {
-                    for task in tasks {
-                        if let dlTask = task as? URLSessionDownloadTask, let id = dlTask.taskDescription {
-                            self?.activeTasks[id] = dlTask
-                            // Update state to downloading if it was running
-                            if dlTask.state == .running {
-                                self?.downloadTasks[id] = .downloading
-                            }
+            self.stateQueue.sync {
+                var runningTaskIds = Set<String>()
+                
+                for task in tasks {
+                    if let dlTask = task as? URLSessionDownloadTask, let id = dlTask.taskDescription {
+                        self.activeTasks[id] = dlTask
+                        runningTaskIds.insert(id)
+                        
+                        // Update state to downloading if it was running
+                        if dlTask.state == .running {
+                            self.downloadTasks[id] = .downloading
+                        }
+                    }
+                }
+                
+                // Auto-resume downloads that should be running but aren't
+                let fileManager = FileManager.default
+                let docs = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
+                let downloadsDir = docs.appendingPathComponent("downloads")
+                
+                let tasksSnapshot = self.downloadTasks
+                for (id, state) in tasksSnapshot {
+                    if state == .downloading && !runningTaskIds.contains(id) {
+                        let dest = downloadsDir.appendingPathComponent("\(id).mp4")
+                        if fileManager.fileExists(atPath: dest.path) {
+                            // File exists, mark completed
+                            self.downloadTasks[id] = .completed
+                        } else {
+                             // Not running and file missing -> restart
+                             // Ensure we don't have an active task (already checked !runningTaskIds but activeTasks map might differ if logic is buggy, but runningTaskIds comes from session)
+                             if self.activeTasks[id] == nil, let track = self.trackMap[id] {
+                                 // Restart logic:
+                                 // If it's a bilibili link, we need to resolve again which is async.
+                                 // We can't do that synchronously inside restoreTasks if we want to hold the lock.
+                                 // Dispatch to main to start the full download flow (resolve -> download)
+                                 DispatchQueue.main.async {
+                                     self.downloadTrack(track: track)
+                                 }
+                             }
                         }
                     }
                 }
             }
-        } catch {
-
         }
     }
     
@@ -256,66 +300,81 @@ class OrpheusDownloadManager: NSObject, URLSessionDownloadDelegate {
             }
             try fileManager.moveItem(at: location, to: dest)
             
-            downloadTasks[id] = .completed
-            activeTasks.removeValue(forKey: id)
-            saveTasks()
+            var track: Track?
+            stateQueue.sync {
+                downloadTasks[id] = .completed
+                activeTasks.removeValue(forKey: id)
+                saveTasksLocked()
+                track = trackMap[id]
+            }
             
-            if let track = trackMap[id] {
-                notifyUpdate(id: id, state: .completed, track: track)
+            if let t = track {
+                notifyUpdate(id: id, state: .completed, track: t)
             }
         } catch {
-
-            downloadTasks[id] = .failed
-            saveTasks()
-            notifyUpdate(id: id, state: .failed, track: trackMap[id])
+            var track: Track?
+            stateQueue.sync {
+                downloadTasks[id] = .failed
+                saveTasksLocked()
+                track = trackMap[id]
+            }
+            notifyUpdate(id: id, state: .failed, track: track)
         }
     }
-    
-
     
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         guard let id = task.taskDescription else { return }
         
         if let error = error {
-
-            if (error as NSError).code == NSURLErrorCancelled {
-                downloadTasks[id] = .stopped
-            } else {
-                downloadTasks[id] = .failed
-                notifyUpdate(id: id, state: .failed, track: trackMap[id])
+            var track: Track?
+            var state: DownloadState = .failed
+            
+            stateQueue.sync {
+                if (error as NSError).code == NSURLErrorCancelled {
+                    downloadTasks[id] = .stopped
+                    state = .stopped
+                } else {
+                    downloadTasks[id] = .failed
+                    state = .failed
+                }
+                activeTasks.removeValue(forKey: id)
+                saveTasksLocked()
+                track = trackMap[id]
             }
-            activeTasks.removeValue(forKey: id)
-            saveTasks()
+            
+            if state == .failed {
+                notifyUpdate(id: id, state: .failed, track: track)
+            }
         }
     }
     
     func getDownloads() -> [DownloadTask] {
-        return trackMap.map { (id, track) -> DownloadTask in
-            let task = DownloadTask()
-            task.id = id
-            task.state = downloadTasks[id] ?? .queued
-            task.track = track
-            
-            if task.state == .completed {
-                task.percentDownloaded = 1.0
-                task.contentLength = 0 // Calculate fileSize?
-                // Get file size
-                let fileManager = FileManager.default
-                let docs = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
-                let dest = docs.appendingPathComponent("downloads/\(id).mp4")
-                if let attrs = try? fileManager.attributesOfItem(atPath: dest.path),
-                   let size = attrs[.size] as? Double {
-                    task.contentLength = size
-                    task.bytesDownloaded = size
+        return stateQueue.sync {
+            return trackMap.map { (id, track) -> DownloadTask in
+                let task = DownloadTask()
+                task.id = id
+                task.state = downloadTasks[id] ?? .queued
+                task.track = track
+                
+                if task.state == .completed {
+                    task.percentDownloaded = 1.0
+                    task.contentLength = 0
+                    let fileManager = FileManager.default
+                    let docs = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
+                    let dest = docs.appendingPathComponent("downloads/\(id).mp4")
+                    if let attrs = try? fileManager.attributesOfItem(atPath: dest.path),
+                       let size = attrs[.size] as? Double {
+                        task.contentLength = size
+                        task.bytesDownloaded = size
+                    }
+                } else if let active = activeTasks[id] {
+                    task.bytesDownloaded = Double(active.countOfBytesReceived)
+                    task.contentLength = Double(active.countOfBytesExpectedToReceive)
+                    task.percentDownloaded = task.contentLength > 0 ? task.bytesDownloaded / task.contentLength : 0
                 }
-            } else if let active = activeTasks[id] {
-                // Approximate from active task?
-                task.bytesDownloaded = Double(active.countOfBytesReceived)
-                task.contentLength = Double(active.countOfBytesExpectedToReceive)
-                task.percentDownloaded = task.contentLength > 0 ? task.bytesDownloaded / task.contentLength : 0
+                
+                return task
             }
-            
-            return task
         }
     }
     
@@ -326,24 +385,44 @@ class OrpheusDownloadManager: NSObject, URLSessionDownloadDelegate {
     }
     
     func getDownloadStatusByIds(ids: [String]) -> [String: Int] {
-        var result: [String: Int] = [:]
-        for id in ids {
-            if let state = downloadTasks[id] {
-                result[id] = state.rawValue
+        return stateQueue.sync {
+            var result: [String: Int] = [:]
+            for id in ids {
+                if let state = downloadTasks[id] {
+                    result[id] = state.rawValue
+                }
             }
+            return result
         }
-        return result
     }
     
     func clearUncompletedTasks() {
-        for (id, state) in downloadTasks {
-            if state != .completed {
-                removeDownload(id: id)
+        stateQueue.sync {
+            // Need to remove tasks physically too
+            let idsShouldRemove = downloadTasks.filter { $0.value != .completed }.map { $0.key }
+            
+            let fileManager = FileManager.default
+            let docs = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
+            
+            for id in idsShouldRemove {
+                if let task = activeTasks[id] {
+                    task.cancel()
+                    activeTasks.removeValue(forKey: id)
+                }
+                
+                let dest = docs.appendingPathComponent("downloads/\(id).mp4")
+                try? fileManager.removeItem(at: dest)
+                
+                downloadTasks.removeValue(forKey: id)
+                trackMap.removeValue(forKey: id)
             }
+            
+            saveTasksLocked()
         }
     }
     
     func getUncompletedTasks() -> [DownloadTask] {
+        // Safe to call getDownloads() (which syncs) then filter
         return getDownloads().filter { $0.state != .completed }
     }
     

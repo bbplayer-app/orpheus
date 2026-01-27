@@ -32,7 +32,7 @@
     "@commitlint/cli": "^20.3.1",
     "@commitlint/config-conventional": "^20.3.1",
     "@evilmartians/lefthook": "^2.0.15",
-    "@release-it/conventional-changelog": "^10.0.4",
+    "@release-it/conventional-changelog": "^8.0.2",
     "@types/react": "~19.1.0",
     "expo": "^54.0.24",
     "expo-module-scripts": "^5.0.7",

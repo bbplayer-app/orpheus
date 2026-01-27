@@ -12,6 +12,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.Timeline
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.CommandButton
 import androidx.media3.session.DefaultMediaNotificationProvider
@@ -164,7 +165,10 @@ class OrpheusMusicService : MediaLibraryService() {
             .setDataSourceFactory(dataSourceFactory)
 
 
-        player = ExoPlayer.Builder(this)
+        val renderersFactory = DefaultRenderersFactory(this)
+            .experimentalSetMediaCodecAsyncCryptoFlagEnabled(false)
+
+        player = ExoPlayer.Builder(this, renderersFactory)
             .setMediaSourceFactory(mediaSourceFactory)
             .setAudioAttributes(
                 AudioAttributes.Builder()

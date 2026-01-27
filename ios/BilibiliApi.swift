@@ -50,7 +50,7 @@ struct BilibiliPlayUrlResponse: Codable {
     }
 }
 
-// Response for PageList
+
 struct BilibiliPageListResponse: Codable {
     let code: Int
     let message: String?
@@ -69,7 +69,14 @@ class BilibiliApi {
     private let session = URLSession.shared
     private var cookie: String?
     
-    // Wbi keys cache
+    // Constants for API parameters
+    private let BiliQualityHigh = 80 // 1080P
+    private let BiliFnvalDash = 16 
+    private let FnvalMp4 = 1
+    private let FnverDefault = 0
+    private let FourKEnabled = 1
+    private let PlatformHtml5 = "html5"
+
     private var imgKey: String?
     private var subKey: String?
     private var wbiKeysUpdatedAt: Date?
@@ -79,10 +86,18 @@ class BilibiliApi {
     }
     
     func getPageList(bvid: String, completion: @escaping (Result<Int, Error>) -> Void) {
-         var components = URLComponents(string: "https://api.bilibili.com/x/player/pagelist")!
+         guard var components = URLComponents(string: "https://api.bilibili.com/x/player/pagelist") else {
+             completion(.failure(BilibiliError.invalidUrl))
+             return
+         }
          components.queryItems = [URLQueryItem(name: "bvid", value: bvid)]
          
-         var request = URLRequest(url: components.url!)
+         guard let url = components.url else {
+             completion(.failure(BilibiliError.invalidUrl))
+             return
+         }
+         
+         var request = URLRequest(url: url)
          request.httpMethod = "GET"
          if let cookie = cookie {
              request.setValue(cookie, forHTTPHeaderField: "Cookie")
@@ -104,7 +119,6 @@ class BilibiliApi {
              do {
                  let apiResponse = try JSONDecoder().decode(BilibiliPageListResponse.self, from: data)
                  if apiResponse.code != 0 {
-
                      completion(.failure(BilibiliError.apiError(code: apiResponse.code, message: apiResponse.message ?? "Unknown error")))
                      return
                  }
@@ -115,7 +129,6 @@ class BilibiliApi {
                      completion(.failure(BilibiliError.decodingFailed))
                  }
              } catch {
-
                  completion(.failure(error))
              }
          }.resume()
@@ -178,22 +191,29 @@ class BilibiliApi {
         let params: [String: Any] = [
             "bvid": bvid,
             "cid": cid,
-            "qn": 80, // 1080P
+            "qn": BiliQualityHigh,
             // fnval=1 requests MP4/FLV durl list which is better for AVPlayer
-            "fnval": 1, 
-            "fnver": 0,
-            "fourk": 1,
-            "platform": "html5" // Explicitly request html5 compatible (mp4)
+            "fnval": FnvalMp4, 
+            "fnver": FnverDefault,
+            "fourk": FourKEnabled,
+            "platform": PlatformHtml5
         ]
         
         let signedParams = WbiUtil.sign(params: params, imgKey: imgKey, subKey: subKey)
         
-        var components = URLComponents(string: "https://api.bilibili.com/x/player/wbi/playurl")!
+        guard var components = URLComponents(string: "https://api.bilibili.com/x/player/wbi/playurl") else {
+             completion(.failure(BilibiliError.invalidUrl))
+             return
+        }
         components.queryItems = signedParams.map { URLQueryItem(name: $0.key, value: $0.value) }
         
-
         
-        var request = URLRequest(url: components.url!)
+        guard let url = components.url else {
+             completion(.failure(BilibiliError.invalidUrl))
+             return
+        }
+        
+        var request = URLRequest(url: url)
         if let cookie = cookie {
             request.setValue(cookie, forHTTPHeaderField: "Cookie")
         }
@@ -202,7 +222,6 @@ class BilibiliApi {
         
         session.dataTask(with: request) { data, response, error in
             if let error = error {
-
                 completion(.failure(error))
                 return
             }
@@ -212,7 +231,6 @@ class BilibiliApi {
                 return
             }
             
-
             
             do {
                 let playUrlResponse = try JSONDecoder().decode(BilibiliPlayUrlResponse.self, from: data)
@@ -224,16 +242,13 @@ class BilibiliApi {
                 
                 // Prioritize Dash Audio, then Durl
                 if let audioUrl = playUrlResponse.data?.dash?.audio?.first?.baseUrl {
-
                     completion(.success(audioUrl))
                 } else if let mp4Url = playUrlResponse.data?.durl?.first?.url {
-
                     completion(.success(mp4Url))
                 } else {
                     completion(.failure(BilibiliError.decodingFailed))
                 }
             } catch {
-
                 completion(.failure(error))
             }
         }.resume()

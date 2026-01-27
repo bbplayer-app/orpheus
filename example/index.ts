@@ -11,6 +11,8 @@ registerOrpheusHeadlessTask(async (event) => {
           if (event.trackId === 'bilibili--BV1DL4y1V7xH--584235509') {
         await Orpheus.setDesktopLyrics(JSON.stringify(LYRICS_DATA));
       }
+  } else if (event.eventName === 'onTrackFinished') {
+    console.log('[OrpheusHeadlessTask] Track Finished:', event.trackId, 'Position:', event.finalPosition, 'Duration:', event.duration);
   }
 });
 

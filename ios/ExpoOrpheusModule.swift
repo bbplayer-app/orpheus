@@ -10,7 +10,11 @@ public class ExpoOrpheusModule: Module {
         }
         
         manager.onTrackStarted = { [weak self] trackId, reason in
-            self?.sendEvent("onTrackStarted", ["trackId": trackId, "reason": reason.rawValue])
+            self?.sendEvent("onHeadlessEvent", [
+                "eventName": "onTrackStarted",
+                "trackId": trackId,
+                "reason": reason.rawValue
+            ])
         }
         
         manager.onPositionUpdate = { [weak self] position, duration, buffered in
@@ -31,8 +35,17 @@ public class ExpoOrpheusModule: Module {
             ])
         }
         
+        manager.onTrackFinished = { [weak self] trackId, finalPosition, duration in
+            self?.sendEvent("onHeadlessEvent", [
+                "eventName": "onTrackFinished",
+                "trackId": trackId,
+                "finalPosition": finalPosition,
+                "duration": duration
+            ])
+        }
+
         manager.onPlayerError = { [weak self] errorMsg in
-            self?.sendEvent("onPlayerError", ["error": errorMsg])
+            self?.sendEvent("onPlayerError", ["platform": "ios", "error": errorMsg])
         }
         
         manager.onIsPlayingChanged = { [weak self] isPlaying in
@@ -45,14 +58,14 @@ public class ExpoOrpheusModule: Module {
         
 
         Events(
+        Events(
             "onPlaybackStateChanged",
-            "onTrackStarted",
-            "onTrackFinished",
             "onPlayerError",
             "onPositionUpdate",
             "onIsPlayingChanged",
             "onDownloadUpdated",
-            "onPlaybackSpeedChanged"
+            "onPlaybackSpeedChanged",
+            "onHeadlessEvent"
         )
         
         OnCreate {
@@ -222,6 +235,30 @@ public class ExpoOrpheusModule: Module {
     
     Function("getUncompletedDownloadTasks") { () -> [DownloadTask] in
          return OrpheusDownloadManager.shared.getUncompletedTasks()
+    }
+    
+    AsyncFunction("checkOverlayPermission") { () -> Bool in
+        return false
+    }
+    
+    AsyncFunction("requestOverlayPermission") {
+        throw NSError(domain: "Orpheus", code: 1, userInfo: [NSLocalizedDescriptionKey: "Platform not supported"])
+    }
+    
+    AsyncFunction("showDesktopLyrics") {
+        throw NSError(domain: "Orpheus", code: 1, userInfo: [NSLocalizedDescriptionKey: "Platform not supported"])
+    }
+    
+    AsyncFunction("hideDesktopLyrics") {
+         throw NSError(domain: "Orpheus", code: 1, userInfo: [NSLocalizedDescriptionKey: "Platform not supported"])
+    }
+    
+    AsyncFunction("setDesktopLyrics") { (lyricsJson: String) in
+        throw NSError(domain: "Orpheus", code: 1, userInfo: [NSLocalizedDescriptionKey: "Platform not supported"])
+    }
+    
+    AsyncFunction("debugTriggerError") {
+        throw NSError(domain: "Orpheus", code: 1, userInfo: [NSLocalizedDescriptionKey: "Platform not supported"])
     }
   }
 }

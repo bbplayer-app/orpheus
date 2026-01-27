@@ -24,6 +24,7 @@ class OrpheusPlayerManager: NSObject {
 
     var onPlaybackStateChanged: ((PlaybackState) -> Void)?
     var onTrackStarted: ((String, TransitionReason) -> Void)?
+    var onTrackFinished: ((String, Double, Double) -> Void)?
     var onPositionUpdate: ((Double, Double, Double) -> Void)?
     var onIsPlayingChanged: ((Bool) -> Void)?
     var onPlayerError: ((String) -> Void)?
@@ -76,6 +77,10 @@ class OrpheusPlayerManager: NSObject {
     }
     
     private func handleAutoAdvance() {
+        if let current = queueManager.getCurrentTrack(), let duration = player.currentItem?.duration.seconds {
+             onTrackFinished?(current.id, duration, duration)
+        }
+
         if repeatMode == .track {
             player.seek(to: .zero)
             player.play()

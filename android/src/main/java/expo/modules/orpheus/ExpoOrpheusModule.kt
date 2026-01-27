@@ -43,9 +43,6 @@ class ExpoOrpheusModule : Module() {
 
     // 记录上一首歌曲的 ID，用于在切歌时发送给 JS
     private var lastMediaId: String? = null
-    private var lastTrackFinishedAt: Long = 0
-
-    private val durationCache = mutableMapOf<String, Long>()
 
     val gson = Gson()
 
@@ -58,64 +55,11 @@ class ExpoOrpheusModule : Module() {
             val newId = mediaItem?.mediaId ?: ""
             Log.e("Orpheus", "onMediaItemTransition: $reason")
 
-            sendEvent(
-                "onTrackStarted", mapOf(
-                    "trackId" to newId,
-                    "reason" to reason
-                )
-            )
+            Log.e("Orpheus", "onMediaItemTransition: $reason")
 
+            // Headless task is handled by Service, no need to send event here if removed from API
             lastMediaId = newId
             saveCurrentPosition()
-        }
-
-        override fun onTimelineChanged(timeline: Timeline, reason: Int) {
-            val p = player ?: return
-            val currentItem = p.currentMediaItem ?: return
-            val mediaId = currentItem.mediaId
-
-            val duration = p.duration
-            Log.d(
-                "Orpheus",
-                "onTimelineChanged: reason: $reason mediaId: $mediaId duration: $duration"
-            )
-
-            if (duration != C.TIME_UNSET && duration > 0) {
-                durationCache[mediaId] = duration
-            }
-        }
-
-        override fun onPositionDiscontinuity(
-            oldPosition: Player.PositionInfo,
-            newPosition: Player.PositionInfo,
-            reason: Int
-        ) {
-            val isAutoTransition = reason == Player.DISCONTINUITY_REASON_AUTO_TRANSITION
-            val isIndexChanged = oldPosition.mediaItemIndex != newPosition.mediaItemIndex
-            val lastMediaItem = oldPosition.mediaItem ?: return
-            val currentTime = System.currentTimeMillis()
-            if ((currentTime - lastTrackFinishedAt) < 200) {
-                return
-            }
-
-            Log.d(
-                "Orpheus",
-                "onPositionDiscontinuity: isAutoTransition:$isAutoTransition isIndexChanged: $isIndexChanged durationCache:$durationCache"
-            )
-
-            if (isAutoTransition || isIndexChanged) {
-
-                val duration = durationCache[lastMediaItem.mediaId] ?: return
-                lastTrackFinishedAt = currentTime
-
-                sendEvent(
-                    "onTrackFinished", mapOf(
-                        "trackId" to lastMediaItem.mediaId,
-                        "finalPosition" to oldPosition.positionMs / 1000.0,
-                        "duration" to duration / 1000.0,
-                    )
-                )
-            }
         }
 
         /**
@@ -148,7 +92,9 @@ class ExpoOrpheusModule : Module() {
          * 处理错误
          */
         override fun onPlayerError(error: PlaybackException) {
-            sendEvent("onPlayerError", error.toJsMap())
+            val map = error.toJsMap().toMutableMap()
+            map["platform"] = "android"
+            sendEvent("onPlayerError", map)
         }
 
         override fun onRepeatModeChanged(repeatMode: Int) {
@@ -179,8 +125,6 @@ class ExpoOrpheusModule : Module() {
             "onPlayerError",
             "onPositionUpdate",
             "onIsPlayingChanged",
-            "onTrackFinished",
-            "onTrackStarted",
             "onDownloadUpdated",
             "onPlaybackSpeedChanged"
         )
@@ -316,7 +260,6 @@ class ExpoOrpheusModule : Module() {
         AsyncFunction("clear") {
             checkPlayer()
             player?.clearMediaItems()
-            durationCache.clear()
         }.runOnQueue(Queues.MAIN)
 
         AsyncFunction("skipTo") { index: Int ->
@@ -409,7 +352,6 @@ class ExpoOrpheusModule : Module() {
             val p = player ?: return@AsyncFunction
             if (clearQueue == true) {
                 p.clearMediaItems()
-                durationCache.clear()
             }
             val initialSize = p.mediaItemCount
             p.addMediaItems(mediaItems)

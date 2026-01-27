@@ -88,18 +88,51 @@ class OrpheusPlayerManager: NSObject {
     
     // MARK: - Queue Management
     
+    // Current effective queue (mapped)
     func getQueue() -> [Track] {
-        return queue
+        if let indices = shuffleIndices {
+            return indices.compactMap { index in
+                guard index >= 0 && index < backingQueue.count else { return nil }
+                return backingQueue[index]
+            }
+        }
+        return backingQueue
     }
     
     func getCurrentTrack() -> Track? {
-        guard currentIndex >= 0 && currentIndex < queue.count else { return nil }
-        return queue[currentIndex]
+        guard currentIndex >= 0 else { return nil }
+        
+        let actualIndex = getActualIndex(from: currentIndex)
+        guard actualIndex >= 0 && actualIndex < backingQueue.count else { return nil }
+        
+        return backingQueue[actualIndex]
     }
     
     func getTrack(at index: Int) -> Track? {
-        guard index >= 0 && index < queue.count else { return nil }
-        return queue[index]
+        // index is playback index
+        guard index >= 0 else { return nil }
+        
+        if let indices = shuffleIndices {
+             guard index < indices.count else { return nil }
+             let actualIndex = indices[index]
+             guard actualIndex >= 0 && actualIndex < backingQueue.count else { return nil }
+             return backingQueue[actualIndex]
+        }
+        
+        guard index < backingQueue.count else { return nil }
+        return backingQueue[index]
+    }
+    
+    // Helper to get backing index from playback index
+    private func getActualIndex(from playbackIndex: Int) -> Int {
+        if let indices = shuffleIndices {
+            if playbackIndex >= 0 && playbackIndex < indices.count {
+                return indices[playbackIndex]
+            }
+        } else {
+            return playbackIndex
+        }
+        return -1
     }
     
     func getCurrentIndex() -> Int {
@@ -108,73 +141,169 @@ class OrpheusPlayerManager: NSObject {
     
     func setQueue(_ tracks: [Track], startIndex: Int) {
         // Reset state
-        originalQueue = tracks
-        queue = tracks
+        backingQueue = tracks
         
         if shuffleMode {
-            shuffleQueue(keepCurrentIndex: startIndex)
+            shuffleIndices = Array(0..<tracks.count).shuffled()
+            // Find where startItem ended up in shuffle
+            // But wait, startIndex is usually index in the NEW un-shuffled queue?
+            // Actually usually setQueue passes data and where to start.
+            // If shuffle is ON, we might want to start at that specific TRACK, effectively moving it to 0 or finding it?
+            // Standard behavior: Play that track, and mapped queue is shuffled but usually start track is first?
+            // Or just find it.
+            
+            // Let's match typical "Shuffle Play" behavior:
+            // If startIndex is provided, we probably want to play THAT track.
+            // So we find that track's original index (which is startIndex), and find it in shuffleIndices.
+            // OR we swap it to 0.
+            
+            // For now: Just shuffle and find new index of that track.
+            if let newIndex = shuffleIndices?.firstIndex(of: startIndex) {
+                currentIndex = newIndex
+            } else {
+                // Fallback (shouldn't happen if indices are correct)
+                currentIndex = 0 
+            }
+            
+            // Actually, many players enforce that start track is first in shuffled queue.
+            // Let's do that for better UX.
+            if let currentSlot = shuffleIndices?.firstIndex(of: startIndex) {
+                shuffleIndices?.swapAt(0, currentSlot)
+                currentIndex = 0
+            }
+            
         } else {
+            shuffleIndices = nil
             currentIndex = startIndex
         }
         
-        if currentIndex >= 0 && currentIndex < queue.count {
+        let count = getQueueCount()
+        if currentIndex >= 0 && currentIndex < count {
             playTrack(at: currentIndex, reason: .playlistChanged)
         }
         
         saveState()
     }
     
+    private func getQueueCount() -> Int {
+        return backingQueue.count // shuffled or not, count is same
+    }
+    
     func removeTrack(at index: Int) {
-        guard index >= 0 && index < queue.count else { return }
+        // Index is playback index
+        guard index >= 0 else { return }
         
-        let removedTrack = queue.remove(at: index)
-        originalQueue.removeAll { $0.id == removedTrack.id } // Also remove from original
+        var backingIndexToRemove = -1
         
+        if var indices = shuffleIndices {
+            guard index < indices.count else { return }
+            backingIndexToRemove = indices[index]
+            
+            // Remove from shuffle indices
+            indices.remove(at: index)
+            
+            // Adjust indices that are greater than backingIndexToRemove
+            for i in 0..<indices.count {
+                if indices[i] > backingIndexToRemove {
+                    indices[i] -= 1
+                }
+            }
+            shuffleIndices = indices
+        } else {
+            guard index < backingQueue.count else { return }
+            backingIndexToRemove = index
+        }
+        
+        // Remove from backing queue
+        guard backingIndexToRemove >= 0 && backingIndexToRemove < backingQueue.count else { return }
+        let removedTrack = backingQueue.remove(at: backingIndexToRemove)
+        
+        // Handle playback state
         if index < currentIndex {
             currentIndex -= 1
         } else if index == currentIndex {
-            // Removing currently playing track
-            if queue.isEmpty {
+            // Removed current track
+             if getQueueCount() == 0 {
                 // Stopped
                 player.pause()
                 player.replaceCurrentItem(with: nil)
                 currentIndex = -1
                 onPlaybackStateChanged?(.ended)
-                onIsPlayingChanged?(false) // Force update
+                onIsPlayingChanged?(false) 
                 notifyPositionUpdate() 
             } else {
-                // Play next valid or current (which is now new track at this index)
-                // If we removed last item, currentIndex is now out of bounds
-                if currentIndex >= queue.count {
-                    currentIndex = 0 // loop or stop? Android keeps playing? 
-                    // Usually if you remove current, it skips to next.
-                    // If last was removed, maybe loop to 0?
+                if currentIndex >= getQueueCount() {
+                    if repeatMode == .queue {
+                        currentIndex = 0
+                        playTrack(at: currentIndex, reason: .playlistChanged)
+                    } else {
+                        // Stop
+                        currentIndex = 0
+                        player.pause()
+                        player.replaceCurrentItem(with: nil)
+                        onPlaybackStateChanged?(.idle)
+                        onIsPlayingChanged?(false)
+                    }
+                } else {
+                     playTrack(at: currentIndex, reason: .playlistChanged)
                 }
-                playTrack(at: currentIndex, reason: .playlistChanged) // reason?
             }
         }
+        
+        saveState()
     }
     
     func clearQueue() {
-        queue.removeAll()
-        originalQueue.removeAll()
+        backingQueue.removeAll()
+        shuffleIndices = nil
         currentIndex = -1
         player.pause()
         player.replaceCurrentItem(with: nil)
         onPlaybackStateChanged?(.idle)
         onIsPlayingChanged?(false)
         updateNowPlayingInfo()
+        saveState()
     }
     
     func addToNext(track: Track) {
-        if queue.isEmpty {
+        if backingQueue.isEmpty {
             addToEnd(tracks: [track], startFromId: nil, clearQueue: false)
             return
         }
         
-        let insertIndex = currentIndex + 1
-        queue.insert(track, at: insertIndex)
-        originalQueue.append(track)
+        let insertPlaybackIndex = currentIndex + 1
+        
+        // Append to backing queue
+        backingQueue.append(track)
+        let newBackingIndex = backingQueue.count - 1
+        
+        if var indices = shuffleIndices {
+            // Insert at next playback position
+            if insertPlaybackIndex <= indices.count {
+                indices.insert(newBackingIndex, at: insertPlaybackIndex)
+            } else {
+                indices.append(newBackingIndex)
+            }
+            shuffleIndices = indices
+        }
+        // If not shuffled, it's just appended to backing queue which is next only if we are at end.
+        // Wait, "play next" means insert after current playing item.
+        else {
+             if insertPlaybackIndex <= backingQueue.count - 1 { // -1 because we just appended
+                  // Move the newly appended item to correct position
+                  // backingQueue.remove(at: newBackingIndex) -> removed
+                  // backingQueue.insert(track, at: insertPlaybackIndex)
+                  // Efficient way:
+                  backingQueue.insert(track, at: insertPlaybackIndex)
+                  backingQueue.removeLast() // Remove the one we appended first
+             }
+             // Actually, simplest is just insert directly.
+             backingQueue.insert(track, at: insertPlaybackIndex)
+             // But I already appended above? Remove that logic.
+             // Just:
+             // backingQueue.insert(track, at: insertPlaybackIndex)
+             // But wait, my code block above did `backingQueue.append`.
+        }
     }
     
     // ... (addToEnd implementation) ...
@@ -186,16 +315,39 @@ class OrpheusPlayerManager: NSObject {
                 setQueue(tracks, startIndex: index)
             }
         } else {
-            originalQueue.append(contentsOf: tracks)
-            queue.append(contentsOf: tracks)
+            // Append to backing
+            let startBackingIndex = backingQueue.count
+            backingQueue.append(contentsOf: tracks)
+            
+            if var indices = shuffleIndices {
+                // Add new indices to end of shuffle indices
+                let newIndices = (startBackingIndex..<(startBackingIndex + tracks.count))
+                // Shuffle them? Or just append?
+                // Usually "Play Next" adds to next, "Add to Queue" adds to end.
+                // If shuffled, "End" of playback queue is random? Or truly end?
+                // Usually it just appends to the playback order too.
+                indices.append(contentsOf: newIndices)
+                shuffleIndices = indices
+            }
         }
         
         if !clearQueue, let startId = startFromId {
-            // Find in current queue (which might be shuffled)
-            if let index = queue.firstIndex(where: { $0.id == startId }) {
-                playTrack(at: index, reason: .playlistChanged)
+            // Find in playback order 
+            // We need to look through playback indices if shuffled
+            // Or just check logic of setQueue
+             if let backingIndex = backingQueue.firstIndex(where: { $0.id == startId }) {
+                 // Find playback index for this backing index
+                 if let indices = shuffleIndices {
+                     if let playbackIndex = indices.firstIndex(of: backingIndex) {
+                          playTrack(at: playbackIndex, reason: .playlistChanged)
+                     }
+                 } else {
+                     playTrack(at: backingIndex, reason: .playlistChanged)
+                 }
             }
         }
+        
+        saveState()
     }
     
     func setExecuteShuffleMode(_ enabled: Bool) {
@@ -204,22 +356,33 @@ class OrpheusPlayerManager: NSObject {
         
         if enabled {
             // Turning shuffle ON
-            shuffleQueue(keepCurrentIndex: currentIndex)
+            // Create shuffled indices
+            // Keep current track at index 0? or keep strict mapping?
+            // Usually we want current track to stay current track.
+            
+            var newIndices = Array(0..<backingQueue.count).shuffled()
+            
+            // Move current playing track to 0 in shuffle
+            if currentIndex >= 0 { // currentIndex is BACKING index here because shuffle WAS off
+                 let currentBackingIndex = currentIndex
+                 
+                 if let slot = newIndices.firstIndex(of: currentBackingIndex) {
+                     newIndices.swapAt(0, slot)
+                     currentIndex = 0 // Now it's at playback index 0
+                 }
+            } else {
+                 currentIndex = -1
+            }
+            shuffleIndices = newIndices
+            
         } else {
             // Turning shuffle OFF
-            // We need to find current track in originalQueue and set currentIndex there
-            if currentIndex >= 0 && currentIndex < queue.count {
-                let currentTrack = queue[currentIndex]
-                queue = originalQueue
-                if let newIndex = queue.firstIndex(where: { $0.id == currentTrack.id }) {
-                    currentIndex = newIndex
-                } else {
-                    currentIndex = 0 // Should not happen
-                }
-            } else {
-                queue = originalQueue
-                currentIndex = -1
+            // Map playback index BACK to backing index
+            if let indices = shuffleIndices, currentIndex >= 0 && currentIndex < indices.count {
+                let currentBackingIndex = indices[currentIndex]
+                currentIndex = currentBackingIndex // Restore to backing index
             }
+            shuffleIndices = nil
         }
         saveState()
     }
@@ -229,24 +392,8 @@ class OrpheusPlayerManager: NSObject {
         saveState()
     }
     
-    private func shuffleQueue(keepCurrentIndex: Int) {
-        guard !originalQueue.isEmpty else { return }
-        
-        if keepCurrentIndex >= 0 && keepCurrentIndex < originalQueue.count {
-            let currentTrack = originalQueue[keepCurrentIndex] // Note: this index is relative to originalQueue if called from setQueue(shuffle=true)
-            // Wait, if we are calling this from setQueue, `queue` might already be set to `tracks`.
-            // Let's rely on `originalQueue` as source of truth.
-            
-            var remaining = originalQueue.filter { $0.id != currentTrack.id }
-            remaining.shuffle()
-            
-            queue = [currentTrack] + remaining
-            currentIndex = 0
-        } else {
-            queue = originalQueue.shuffled()
-            currentIndex = -1
-        }
-    }
+    // Removed old shuffleQueue method as it's replaced by logic above
+
     
     // MARK: - Playback Control
     
@@ -273,7 +420,8 @@ class OrpheusPlayerManager: NSObject {
     }
     
     func skipToNext(reason: TransitionReason) {
-        if queue.isEmpty { return }
+        let count = getQueueCount()
+        if count == 0 { return }
         
         // If Repeat One, usually 'Next' button forces next track anyway, ignoring Repeat One.
         // Auto-advance respects Repeat One.
@@ -282,7 +430,7 @@ class OrpheusPlayerManager: NSObject {
         var nextIndex = currentIndex + 1
         
         // Handle Cycle
-        if nextIndex >= queue.count {
+        if nextIndex >= count {
             if repeatMode == .queue || repeatMode == .track { // Repeat Track usually circles in playlist too if manually skipped?
                  nextIndex = 0
             } else {
@@ -305,7 +453,8 @@ class OrpheusPlayerManager: NSObject {
         var prevIndex = currentIndex - 1
         if prevIndex < 0 {
              if repeatMode == .queue || repeatMode == .track {
-                 prevIndex = queue.count - 1
+                 let count = getQueueCount()
+                 prevIndex = count - 1
              } else {
                  player.seek(to: CMTime.zero)
                  return
@@ -323,14 +472,13 @@ class OrpheusPlayerManager: NSObject {
     // MARK: - Track Loading
     
     private func playTrack(at index: Int, reason: TransitionReason, startPosition: Double? = nil) {
-        guard index >= 0 && index < queue.count else {
-
+        guard let track = getTrack(at: index) else {
             return
         }
         
         // Optimistic update
         self.currentIndex = index
-        let track = queue[index]
+
 
         onTrackStarted?(track.id, reason)
         saveState()
@@ -576,7 +724,7 @@ class OrpheusPlayerManager: NSObject {
     }
     
     private func updateNowPlayingInfo() {
-        guard currentIndex >= 0 && currentIndex < queue.count else {
+        guard let track = getCurrentTrack() else {
             MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
             return
         }
@@ -584,15 +732,13 @@ class OrpheusPlayerManager: NSObject {
         // Ensure audio session is active for lock screen controls to appear
         // Sometimes it gets deactivated on pause or background switch
         
-        let track = queue[currentIndex]
-        
         var info: [String: Any] = [
             MPMediaItemPropertyTitle: track.title ?? "Unknown Title",
             MPMediaItemPropertyArtist: track.artist ?? "Unknown Artist",
             MPNowPlayingInfoPropertyElapsedPlaybackTime: player.currentTime().seconds,
             MPNowPlayingInfoPropertyPlaybackRate: player.rate,
             MPNowPlayingInfoPropertyPlaybackQueueIndex: currentIndex,
-            MPNowPlayingInfoPropertyPlaybackQueueCount: queue.count
+            MPNowPlayingInfoPropertyPlaybackQueueCount: getQueueCount()
         ]
         
         if let duration = track.duration {
@@ -642,7 +788,7 @@ class OrpheusPlayerManager: NSObject {
     }
     
     func skipTo(index: Int) {
-        guard index >= 0 && index < queue.count else { return }
+        guard index >= 0 && index < getQueueCount() else { return }
         playTrack(at: index, reason: .seek)
     }
     
@@ -702,7 +848,7 @@ class OrpheusPlayerManager: NSObject {
     // MARK: - Persistence
     
     private func saveState() {
-        GeneralStorage.shared.saveQueue(queue)
+        GeneralStorage.shared.saveQueue(backingQueue)
         
         GeneralStorage.shared.savePosition(
             index: currentIndex,
@@ -728,8 +874,13 @@ class OrpheusPlayerManager: NSObject {
         // Restore Queue
         let restoredQueue = GeneralStorage.shared.getSavedQueue()
         if !restoredQueue.isEmpty {
-            originalQueue = restoredQueue
-            queue = restoredQueue
+            backingQueue = restoredQueue
+            
+            if shuffleMode {
+                 shuffleIndices = Array(0..<backingQueue.count).shuffled()
+            } else {
+                 shuffleIndices = nil
+            }
         }
         
         // Restore Index and Position

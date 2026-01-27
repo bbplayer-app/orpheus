@@ -27,6 +27,7 @@ import expo.modules.orpheus.models.TrackRecord
 import expo.modules.orpheus.utils.DownloadUtil
 import expo.modules.orpheus.utils.GeneralStorage
 import expo.modules.orpheus.utils.LoudnessStorage
+import expo.modules.orpheus.utils.toJsMap
 import expo.modules.orpheus.utils.toMediaItem
 
 @UnstableApi
@@ -147,12 +148,7 @@ class ExpoOrpheusModule : Module() {
          * 处理错误
          */
         override fun onPlayerError(error: PlaybackException) {
-            sendEvent(
-                "onPlayerError", mapOf(
-                    "code" to error.errorCode.toString(),
-                    "message" to (error.message ?: "Unknown Error")
-                )
-            )
+            sendEvent("onPlayerError", error.toJsMap())
         }
 
         override fun onRepeatModeChanged(repeatMode: Int) {
@@ -644,6 +640,16 @@ class ExpoOrpheusModule : Module() {
         AsyncFunction("getPlaybackSpeed") {
             checkPlayer()
             player?.playbackParameters?.speed ?: 1.0f
+        }.runOnQueue(Queues.MAIN)
+
+        AsyncFunction("debugTriggerError") {
+            val rootCause = RuntimeException("This is a simulated root cause exception")
+            val exception = PlaybackException(
+                "Simulated PlaybackException for debugging",
+                rootCause,
+                PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED
+            )
+            playerListener.onPlayerError(exception)
         }.runOnQueue(Queues.MAIN)
     }
 

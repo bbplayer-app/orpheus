@@ -67,8 +67,8 @@ export default function OrpheusTestScreen() {
     });
 
     const subError = Orpheus.addListener('onPlayerError', (event) => {
-      Alert.alert('Player Error', `Code: ${event.code}\nMessage: ${event.message}`);
-      setLastEventLog(`Error: ${event.code}`);
+      Alert.alert('Player Error', `Code: ${event.errorCode}\nMessage: ${event.message}\nCause: ${event.rootCauseMessage}\nStack: ${event.stackTrace}`);
+      setLastEventLog(`Error: ${event.errorCode}`);
     });
 
     const subDownload = Orpheus.addListener('onDownloadUpdated', (task) => {

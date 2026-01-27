@@ -156,6 +156,13 @@ export const DebugSection: React.FC<DebugSectionProps> = ({
             await syncDesktopLyricsStatus();
          }} />
       </View>
+
+      <Text style={[styles.sectionTitle, { marginTop: 15 }]}>Debug Tools</Text>
+      <View style={styles.grid}>
+         <Button title="Trigger Error" onPress={() => {
+            Orpheus.debugTriggerError();
+         }} danger />
+      </View>
     </View>
   );
 };

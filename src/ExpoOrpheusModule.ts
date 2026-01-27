@@ -33,6 +33,16 @@ export interface Track {
   }
 }
 
+export type PlaybackErrorEvent = {
+  errorCode: number; 
+  errorCodeName: string | null; 
+  timestamp: string; 
+  message: string | null; 
+  stackTrace: string;
+  rootCauseClass: string;
+  rootCauseMessage: string;
+};
+
 export type OrpheusEvents = {
   onPlaybackStateChanged(event: { state: PlaybackState }): void;
   onTrackStarted(event: { trackId: string; reason: TransitionReason }): void;
@@ -41,7 +51,7 @@ export type OrpheusEvents = {
     finalPosition: number;
     duration: number;
   }): void;
-  onPlayerError(event: { code: string; message: string }): void;
+  onPlayerError?: (event: PlaybackErrorEvent) => void;
   onPositionUpdate(event: {
     position: number;
     duration: number;
@@ -210,6 +220,7 @@ declare class OrpheusModule extends NativeModule<OrpheusEvents> {
   
   setPlaybackSpeed(speed: number): Promise<void>;
   getPlaybackSpeed(): Promise<number>;
+  debugTriggerError(): Promise<void>;
 }
 
 export enum DownloadState {

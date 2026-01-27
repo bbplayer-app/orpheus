@@ -1,5 +1,12 @@
 
 
+## [0.10.1](https://github.com/bbplayer-app/orpheus/compare/v0.10.0...v0.10.1) (2026-01-27)
+
+
+### Bug Fixes
+
+* disable experimentalSetMediaCodecAsyncCryptoFlagEnabled in exoplayer ([7f69b15](https://github.com/bbplayer-app/orpheus/commit/7f69b15552da69f232f932df71c38e35deec8684))
+
 # [0.10.0](https://github.com/bbplayer-app/orpheus/compare/v0.9.4...v0.10.0) (2026-01-27)
 
 

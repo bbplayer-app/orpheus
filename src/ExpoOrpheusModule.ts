@@ -50,6 +50,12 @@ export type PlaybackErrorEvent = AndroidPlaybackErrorEvent | IosPlaybackErrorEve
 export type OrpheusEvents = {
   onPlaybackStateChanged(event: { state: PlaybackState }): void;
   onPlaybackStateChanged(event: { state: PlaybackState }): void;
+  onTrackStarted(event: { trackId: string; reason: number }): void;
+  onTrackFinished(event: {
+    trackId: string;
+    finalPosition: number;
+    duration: number;
+  }): void;
   onHeadlessEvent(event: OrpheusHeadlessEvent): void;
   onPlayerError(event: PlaybackErrorEvent): void;
   onPositionUpdate(event: {

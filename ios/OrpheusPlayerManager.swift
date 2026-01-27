@@ -259,6 +259,15 @@ class OrpheusPlayerManager: NSObject {
     // MARK: - Track Loading
     
     private func playTrack(at index: Int, reason: TransitionReason, startPosition: Double? = nil) {
+        // Handle previous track finish (for manual skips)
+        if reason != .auto, let oldTrack = queueManager.getCurrentTrack() {
+             let position = player.currentTime().seconds
+             let duration = player.currentItem?.duration.seconds ?? 0
+             // Only emit if we actually have a duration (implying we were playing something)
+             // or just emit whatever state we have.
+             onTrackFinished?(oldTrack.id, position, duration)
+        }
+
         // Index is BACKING index
         queueManager.skipTo(backingIndex: index)
         guard let track = queueManager.getCurrentTrack() else {

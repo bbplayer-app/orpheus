@@ -340,10 +340,28 @@ class OrpheusMusicService : MediaLibraryService() {
         }
     }
 
+    interface TrackEventListener {
+        fun onTrackStarted(trackId: String, reason: Int)
+        fun onTrackFinished(trackId: String, finalPosition: Double, duration: Double)
+    }
+
+    private val trackEventListeners = mutableListOf<TrackEventListener>()
+
+    fun addTrackEventListener(listener: TrackEventListener) {
+        trackEventListeners.add(listener)
+    }
+
+    fun removeTrackEventListener(listener: TrackEventListener) {
+        trackEventListeners.remove(listener)
+    }
+
     @OptIn(UnstableApi::class)
     private fun sendTrackStartEvent(mediaItem: androidx.media3.common.MediaItem?, reason: Int) {
         if (mediaItem == null) return
         
+        // Notify local listeners
+        trackEventListeners.forEach { it.onTrackStarted(mediaItem.mediaId, reason) }
+
         try {
             val intent = Intent(this, OrpheusHeadlessTaskService::class.java)
             intent.putExtra("eventName", "onTrackStarted")
@@ -356,6 +374,9 @@ class OrpheusMusicService : MediaLibraryService() {
     }
 
     private fun sendTrackFinishedEvent(trackId: String, finalPosition: Double, duration: Double) {
+        // Notify local listeners
+        trackEventListeners.forEach { it.onTrackFinished(trackId, finalPosition, duration) }
+
         try {
             val intent = Intent(this, OrpheusHeadlessTaskService::class.java)
             intent.putExtra("eventName", "onTrackFinished")

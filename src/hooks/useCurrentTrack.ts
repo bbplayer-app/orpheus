@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Track, Orpheus } from "../ExpoOrpheusModule";
-import { addOrpheusHeadlessListener } from "../headless";
+
 
 export function useCurrentTrack() {
   const [track, setTrack] = useState<Track | null>(null);
@@ -30,14 +30,12 @@ export function useCurrentTrack() {
       }
     });
 
-    const sub = addOrpheusHeadlessListener(async (event) => {
-      if (event.eventName === "onTrackStarted") {
-        console.log("Track Started");
-        const { currentTrack, currentIndex } = await fetchTrack();
-        if (isMounted) {
-          setTrack(currentTrack);
-          setIndex(currentIndex);
-        }
+    const sub = Orpheus.addListener("onTrackStarted", async (event) => {
+      console.log("Track Started");
+      const { currentTrack, currentIndex } = await fetchTrack();
+      if (isMounted) {
+        setTrack(currentTrack);
+        setIndex(currentIndex);
       }
     });
 

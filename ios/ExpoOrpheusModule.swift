@@ -11,8 +11,7 @@ public class ExpoOrpheusModule: Module {
         }
         
         manager.onTrackStarted = { [weak self] trackId, reason in
-            self?.sendEvent("onHeadlessEvent", [
-                "eventName": "onTrackStarted",
+            self?.sendEvent("onTrackStarted", [
                 "trackId": trackId,
                 "reason": reason.rawValue
             ])
@@ -37,8 +36,7 @@ public class ExpoOrpheusModule: Module {
         }
         
         manager.onTrackFinished = { [weak self] trackId, finalPosition, duration in
-            self?.sendEvent("onHeadlessEvent", [
-                "eventName": "onTrackFinished",
+            self?.sendEvent("onTrackFinished", [
                 "trackId": trackId,
                 "finalPosition": finalPosition,
                 "duration": duration
@@ -65,7 +63,9 @@ public class ExpoOrpheusModule: Module {
             "onIsPlayingChanged",
             "onDownloadUpdated",
             "onPlaybackSpeedChanged",
-            "onHeadlessEvent"
+            "onHeadlessEvent",
+            "onTrackStarted",
+            "onTrackFinished"
         )
         
         OnCreate {

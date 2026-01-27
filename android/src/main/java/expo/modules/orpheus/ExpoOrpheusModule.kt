@@ -43,7 +43,7 @@ class ExpoOrpheusModule : Module() {
 
     // 记录上一首歌曲的 ID，用于在切歌时发送给 JS
     private var lastMediaId: String? = null
-
+    
     val gson = Gson()
 
     private val playerListener = object : Player.Listener {
@@ -55,12 +55,24 @@ class ExpoOrpheusModule : Module() {
             val newId = mediaItem?.mediaId ?: ""
             Log.e("Orpheus", "onMediaItemTransition: $reason")
 
-            Log.e("Orpheus", "onMediaItemTransition: $reason")
-
             // Headless task is handled by Service, no need to send event here if removed from API
             lastMediaId = newId
             saveCurrentPosition()
         }
+
+        override fun onTimelineChanged(timeline: Timeline, reason: Int) {
+            // Logic moved to Service
+        }
+
+        override fun onPositionDiscontinuity(
+            oldPosition: Player.PositionInfo,
+            newPosition: Player.PositionInfo,
+            reason: Int
+        ) {
+            // Logic moved to Service
+        }
+
+
 
         /**
          * 处理播放状态改变
@@ -126,7 +138,9 @@ class ExpoOrpheusModule : Module() {
             "onPositionUpdate",
             "onIsPlayingChanged",
             "onDownloadUpdated",
-            "onPlaybackSpeedChanged"
+            "onPlaybackSpeedChanged",
+            "onTrackStarted",
+            "onTrackFinished"
         )
 
         OnCreate {
@@ -148,6 +162,40 @@ class ExpoOrpheusModule : Module() {
                         this@ExpoOrpheusModule.player = service.player
                         this@ExpoOrpheusModule.player?.addListener(playerListener)
                     }
+                    
+                    service.addTrackEventListener(object : OrpheusMusicService.TrackEventListener {
+                        override fun onTrackStarted(trackId: String, reason: Int) {
+                            sendEvent("onTrackStarted", mapOf(
+                                "trackId" to trackId,
+                                "reason" to reason
+                            ))
+                        }
+
+                        override fun onTrackFinished(trackId: String, finalPosition: Double, duration: Double) {
+                            sendEvent("onTrackFinished", mapOf(
+                                "trackId" to trackId,
+                                "finalPosition" to finalPosition,
+                                "duration" to duration
+                            ))
+                        }
+                    })
+                    
+                    service.addTrackEventListener(object : OrpheusMusicService.TrackEventListener {
+                        override fun onTrackStarted(trackId: String, reason: Int) {
+                            sendEvent("onTrackStarted", mapOf(
+                                "trackId" to trackId,
+                                "reason" to reason
+                            ))
+                        }
+
+                        override fun onTrackFinished(trackId: String, finalPosition: Double, duration: Double) {
+                            sendEvent("onTrackFinished", mapOf(
+                                "trackId" to trackId,
+                                "finalPosition" to finalPosition,
+                                "duration" to duration
+                            ))
+                        }
+                    })
                 }
             }
 

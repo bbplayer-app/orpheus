@@ -5,7 +5,7 @@ import MediaPlayer
 class OrpheusPlayerManager: NSObject {
     static let shared = OrpheusPlayerManager()
     
-    private var player: AVPlayer!
+    private let player: AVPlayer
     private let queueManager = OrpheusQueueManager()
 
     
@@ -30,8 +30,8 @@ class OrpheusPlayerManager: NSObject {
     var onPlayerError: ((String) -> Void)?
     
     override init() {
+        self.player = AVPlayer()
         super.init()
-        player = AVPlayer()
         setupPlayerObservers()
         setupAudioSession()
         setupRemoteCommands()

@@ -1,5 +1,12 @@
 
 
+# [0.11.0](https://github.com/bbplayer-app/orpheus/compare/v0.10.1...v0.11.0) (2026-01-27)
+
+
+### Features
+
+* error with stackTrace ([1627f2c](https://github.com/bbplayer-app/orpheus/commit/1627f2c9f971a6c712f62482a0797fd25adab7df))
+
 ## [0.10.1](https://github.com/bbplayer-app/orpheus/compare/v0.10.0...v0.10.1) (2026-01-27)
 
 

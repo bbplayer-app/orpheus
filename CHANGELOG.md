@@ -1,5 +1,12 @@
 
 
+## [0.11.2](https://github.com/bbplayer-app/orpheus/compare/v0.11.1...v0.11.2) (2026-01-28)
+
+
+### Bug Fixes
+
+* use mmkv from Wu to match react-native-mmkv deps ([15dba67](https://github.com/bbplayer-app/orpheus/commit/15dba678a42afb6b324b22143b8ad15dabd6d981))
+
 ## [0.11.1](https://github.com/bbplayer-app/orpheus/compare/v0.11.0...v0.11.1) (2026-01-27)
 
 # [0.11.0](https://github.com/bbplayer-app/orpheus/compare/v0.10.1...v0.11.0) (2026-01-27)
